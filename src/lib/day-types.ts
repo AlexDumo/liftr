@@ -5,7 +5,7 @@ export const DAY_TYPES: DayType[] = ['push', 'pull', 'legs', 'cardio']
 export const DAY_TYPE_LABELS: Record<DayType, string> = {
   push: 'Push',
   pull: 'Pull',
-  legs: 'Legs',
+  legs: 'Leg',
   cardio: 'Cardio',
 }
 

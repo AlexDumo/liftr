@@ -1102,6 +1102,6 @@ export const removeSet = createServerFn({ method: 'POST' })
 export const dayTypeLabels: Record<DayType, string> = {
   push: 'Push',
   pull: 'Pull',
-  legs: 'Legs',
+  legs: 'Leg',
   cardio: 'Cardio',
 }
