@@ -3,5 +3,19 @@
   "name": "tanstack-start-app",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry"
+  "main": "@tanstack/react-start/server-entry",
+  "d1_databases": [
+    {
+      "binding": "DATABASE",
+      "database_name": "liftr-db",
+      "database_id": "63d1873e-a332-40a1-85b2-d62bd934a773",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "4390d8c771134be79e44605c824b7076"
+    }
+  ]
 }

@@ -1,0 +1,7 @@
+import * as authSchema from './auth.schema'
+
+export const schema = {
+  ...authSchema,
+} as const
+
+export * from './auth.schema'
