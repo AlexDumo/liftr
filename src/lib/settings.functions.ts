@@ -2,6 +2,7 @@ import { redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { eq } from 'drizzle-orm'
 import { getDb } from '#/db'
+import { users } from '#/db/auth.schema'
 import { userSettings } from '#/db/workout.schema'
 import { getSession } from '#/lib/auth-session'
 
@@ -30,10 +31,37 @@ export const getUserSettings = createServerFn({ method: 'GET' }).handler(
 
     const settings = firstRow(rows)
     return {
+      name: user.name,
       bodyWeightLbs: settings?.bodyWeightLbs ?? null,
     }
   },
 )
+
+export const updateUserName = createServerFn({ method: 'POST' })
+  .validator((data: { name: string }) => {
+    const name = data.name.trim()
+    if (!name) {
+      throw new Error('Name is required')
+    }
+    if (name.length > 100) {
+      throw new Error('Name is too long')
+    }
+    return { name }
+  })
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const updatedRows = await db
+      .update(users)
+      .set({ name: data.name, updatedAt: new Date() })
+      .where(eq(users.id, user.id))
+      .returning({ name: users.name })
+
+    const updated = firstRow(updatedRows)
+    if (!updated) throw new Error('Failed to update name')
+    return { name: updated.name }
+  })
 
 export const updateBodyWeight = createServerFn({ method: 'POST' })
   .validator((data: { bodyWeightLbs: number | null }) => {

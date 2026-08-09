@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
 import { env } from 'cloudflare:workers'
 import type { IncomingRequestCfProperties } from '@cloudflare/workers-types'
+import { eq } from 'drizzle-orm'
 import { getDb } from '#/db'
 import { users } from '#/db/auth.schema'
 import { createAuth } from '#/lib/auth'
@@ -28,7 +29,6 @@ async function ensureLocalDevUser() {
     .onConflictDoUpdate({
       target: users.id,
       set: {
-        name: 'Local Host',
         email: 'local@localhost',
         emailVerified: true,
         updatedAt: now,
@@ -36,7 +36,21 @@ async function ensureLocalDevUser() {
     })
 }
 
-function localDevSession() {
+async function localDevSession() {
+  await ensureLocalDevUser()
+
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, LOCAL_DEV_USER_ID))
+    .limit(1)
+
+  const user = rows[0]
+  if (!user) {
+    throw new Error('Failed to load local dev user')
+  }
+
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 365)
 
@@ -52,13 +66,13 @@ function localDevSession() {
       userAgent: 'local-dev',
     },
     user: {
-      id: LOCAL_DEV_USER_ID,
-      name: 'Local Host',
-      email: 'local@localhost',
-      emailVerified: true,
-      image: null,
-      createdAt: now,
-      updatedAt: now,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      emailVerified: user.emailVerified,
+      image: user.image,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
     },
   }
 }
@@ -66,7 +80,6 @@ function localDevSession() {
 export const getSession = createServerFn({ method: 'GET' }).handler(
   async () => {
     if (import.meta.env.DEV) {
-      await ensureLocalDevUser()
       return localDevSession()
     }
 
