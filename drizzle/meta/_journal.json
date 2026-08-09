@@ -15,6 +15,13 @@
       "when": 1786292258547,
       "tag": "0001_wonderful_infant_terrible",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786293513342,
+      "tag": "0002_curly_ulik",
+      "breakpoints": true
     }
   ]
 }

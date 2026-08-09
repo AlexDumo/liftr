@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as WorkoutWorkoutIdIndexRouteImport } from './routes/workout/$workoutId/index'
+import { Route as WorkoutWorkoutIdExerciseWorkoutExerciseIdRouteImport } from './routes/workout/$workoutId/exercise/$workoutExerciseId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +30,70 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkoutWorkoutIdIndexRoute = WorkoutWorkoutIdIndexRouteImport.update({
+  id: '/workout/$workoutId/',
+  path: '/workout/$workoutId/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute =
+  WorkoutWorkoutIdExerciseWorkoutExerciseIdRouteImport.update({
+    id: '/workout/$workoutId/exercise/$workoutExerciseId',
+    path: '/workout/$workoutId/exercise/$workoutExerciseId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/workout/$workoutId/': typeof WorkoutWorkoutIdIndexRoute
+  '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/workout/$workoutId': typeof WorkoutWorkoutIdIndexRoute
+  '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/workout/$workoutId/': typeof WorkoutWorkoutIdIndexRoute
+  '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/api/auth/$'
+    | '/workout/$workoutId/'
+    | '/workout/$workoutId/exercise/$workoutExerciseId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/auth/$'
-  id: '__root__' | '/' | '/login' | '/api/auth/$'
+  to:
+    | '/'
+    | '/login'
+    | '/api/auth/$'
+    | '/workout/$workoutId'
+    | '/workout/$workoutId/exercise/$workoutExerciseId'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/api/auth/$'
+    | '/workout/$workoutId/'
+    | '/workout/$workoutId/exercise/$workoutExerciseId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  WorkoutWorkoutIdIndexRoute: typeof WorkoutWorkoutIdIndexRoute
+  WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute: typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +119,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workout/$workoutId/': {
+      id: '/workout/$workoutId/'
+      path: '/workout/$workoutId'
+      fullPath: '/workout/$workoutId/'
+      preLoaderRoute: typeof WorkoutWorkoutIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workout/$workoutId/exercise/$workoutExerciseId': {
+      id: '/workout/$workoutId/exercise/$workoutExerciseId'
+      path: '/workout/$workoutId/exercise/$workoutExerciseId'
+      fullPath: '/workout/$workoutId/exercise/$workoutExerciseId'
+      preLoaderRoute: typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +140,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  WorkoutWorkoutIdIndexRoute: WorkoutWorkoutIdIndexRoute,
+  WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute:
+    WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
