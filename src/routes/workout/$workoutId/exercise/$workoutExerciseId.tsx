@@ -401,33 +401,56 @@ function ExerciseLoggingPage() {
 
   const isLastSet = currentSetIndex >= sets.length - 1
 
-  const onPrimaryAction = () => {
-    if (!isLastSet) {
-      setCurrentSetIndex((i) => i + 1)
-      return
-    }
+  const leaveExercise = () => {
     void navigate({
       to: '/workout/$workoutId',
       params: { workoutId },
     })
   }
 
+  const onPrimaryAction = () => {
+    if (!isLastSet) {
+      setCurrentSetIndex((i) => i + 1)
+      return
+    }
+    leaveExercise()
+  }
+
+  const onCancel = () => {
+    if (!window.confirm('Cancel this exercise and return to the workout?')) {
+      return
+    }
+    leaveExercise()
+  }
+
   const exercise = data.workoutExercise.exercise
 
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-lg flex-col px-4 py-6">
-      <header className="mb-6">
-        <p className="text-xs font-semibold tracking-[0.18em] text-[var(--kicker)] uppercase">
-          Logging
-        </p>
-        <h1 className="mt-1 font-heading text-2xl font-medium text-[var(--sea-ink)]">
-          {exercise.name}
-        </h1>
-        {exercise.equipment ? (
-          <p className="mt-1 text-sm text-[var(--sea-ink-soft)]">
-            {exercise.equipment}
+      <header className="mb-6 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold tracking-[0.18em] text-[var(--kicker)] uppercase">
+            Logging
           </p>
-        ) : null}
+          <h1 className="mt-1 font-heading text-2xl font-medium text-[var(--sea-ink)]">
+            {exercise.name}
+          </h1>
+          {exercise.equipment ? (
+            <p className="mt-1 text-sm text-[var(--sea-ink-soft)]">
+              {exercise.equipment}
+            </p>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="min-w-20 shrink-0 border-[var(--line)] bg-[var(--surface)] text-[var(--sea-ink)] hover:bg-[var(--surface-strong)] hover:text-[var(--sea-ink)]"
+          disabled={isPending}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
       </header>
 
       {exercise.imageUrl || exercise.description ? (
