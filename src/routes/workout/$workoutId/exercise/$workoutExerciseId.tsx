@@ -543,8 +543,16 @@ function ExerciseLoggingPage() {
                 'border border-primary bg-[var(--surface-strong)]',
               index < currentSetIndex && 'opacity-50',
             )}
-            onClick={() => setCurrentSetIndex(index)}
-            onFocusCapture={() => setCurrentSetIndex(index)}
+            onClick={
+              index === currentSetIndex
+                ? undefined
+                : () => setCurrentSetIndex(index)
+            }
+            onFocusCapture={() => {
+              if (index !== currentSetIndex) {
+                setCurrentSetIndex(index)
+              }
+            }}
           >
             <div className="flex h-11 items-center justify-center text-sm font-semibold text-[var(--sea-ink)]">
               {index + 1}
@@ -556,7 +564,6 @@ function ExerciseLoggingPage() {
               fields={{ primary: set.primary }}
               bodyWeightLbs={data.bodyWeightLbs}
               barWeightLbs={resolvedBarWeightLbs}
-              disabled={isPending}
               onFieldsChange={(fields) => {
                 applyCascade(index, {
                   primary: fields.primary,
@@ -579,7 +586,6 @@ function ExerciseLoggingPage() {
                 id={`reps-${set.id}`}
                 inputMode="numeric"
                 value={set.reps}
-                disabled={isPending}
                 onChange={(event) => {
                   applyCascade(index, { reps: event.target.value })
                 }}
