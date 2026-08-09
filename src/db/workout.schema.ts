@@ -16,6 +16,14 @@ export type DayType = (typeof dayTypes)[number]
 export const workoutStatuses = ['in_progress', 'completed'] as const
 export type WorkoutStatus = (typeof workoutStatuses)[number]
 
+export const weightInputTypes = [
+  'single',
+  'dumbbell',
+  'barbell',
+  'body',
+] as const
+export type WeightInputType = (typeof weightInputTypes)[number]
+
 export const exercises = sqliteTable(
   'exercises',
   {
@@ -120,6 +128,41 @@ export const exerciseFavorites = sqliteTable(
   ],
 )
 
+export const userSettings = sqliteTable('user_settings', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  bodyWeightLbs: real('body_weight_lbs'),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+})
+
+export const userExerciseWeightPrefs = sqliteTable(
+  'user_exercise_weight_prefs',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    exerciseId: text('exercise_id')
+      .notNull()
+      .references(() => exercises.id, { onDelete: 'cascade' }),
+    inputType: text('input_type').$type<WeightInputType>().notNull(),
+    barWeightLbs: real('bar_weight_lbs'),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.exerciseId],
+    }),
+    index('user_exercise_weight_prefs_user_idx').on(table.userId),
+  ],
+)
+
 export const exercisesRelations = relations(exercises, ({ many }) => ({
   workoutExercises: many(workoutExercises),
   favorites: many(exerciseFavorites),
@@ -164,6 +207,27 @@ export const exerciseFavoritesRelations = relations(
     }),
     exercise: one(exercises, {
       fields: [exerciseFavorites.exerciseId],
+      references: [exercises.id],
+    }),
+  }),
+)
+
+export const userSettingsRelations = relations(userSettings, ({ one }) => ({
+  user: one(users, {
+    fields: [userSettings.userId],
+    references: [users.id],
+  }),
+}))
+
+export const userExerciseWeightPrefsRelations = relations(
+  userExerciseWeightPrefs,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userExerciseWeightPrefs.userId],
+      references: [users.id],
+    }),
+    exercise: one(exercises, {
+      fields: [userExerciseWeightPrefs.exerciseId],
       references: [exercises.id],
     }),
   }),

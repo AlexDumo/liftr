@@ -6,12 +6,19 @@ import {
   dayTypes,
   exerciseFavorites,
   exercises,
+  userExerciseWeightPrefs,
+  userSettings,
   workoutExercises,
   workouts,
   workoutSets,
 } from '#/db/workout.schema'
-import type { DayType } from '#/db/workout.schema'
+import type { DayType, WeightInputType } from '#/db/workout.schema'
 import { getSession } from '#/lib/auth-session'
+import {
+  DEFAULT_BAR_WEIGHT_LBS,
+  defaultWeightInputType,
+  isWeightInputType,
+} from '#/lib/weight-input'
 
 const IMAGE_BASE =
   'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/'
@@ -95,6 +102,36 @@ export const getActiveWorkout = createServerFn({ method: 'GET' }).handler(
       .limit(1)
 
     return firstRow(rows) ?? null
+  },
+)
+
+/** Latest completed workout date (ISO) per day type for the current user. */
+export const getLastCompletedByDayType = createServerFn({ method: 'GET' }).handler(
+  async () => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const rows = await db
+      .select({
+        dayType: workouts.dayType,
+        completedAt: workouts.completedAt,
+        startedAt: workouts.startedAt,
+      })
+      .from(workouts)
+      .where(
+        and(eq(workouts.userId, user.id), eq(workouts.status, 'completed')),
+      )
+      .orderBy(desc(workouts.completedAt), desc(workouts.startedAt))
+
+    const lastByDayType: Partial<Record<DayType, string>> = {}
+    for (const row of rows) {
+      if (lastByDayType[row.dayType]) continue
+      const when = row.completedAt ?? row.startedAt
+      lastByDayType[row.dayType] = when.toISOString()
+      if (Object.keys(lastByDayType).length === dayTypes.length) break
+    }
+
+    return lastByDayType
   },
 )
 
@@ -258,6 +295,57 @@ export const completeWorkout = createServerFn({ method: 'POST' })
     return updated
   })
 
+export const listWorkouts = createServerFn({ method: 'GET' }).handler(
+  async () => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const rows = await db
+      .select({
+        id: workouts.id,
+        dayType: workouts.dayType,
+        status: workouts.status,
+        startedAt: workouts.startedAt,
+        completedAt: workouts.completedAt,
+        exerciseCount: count(workoutExercises.id),
+      })
+      .from(workouts)
+      .leftJoin(workoutExercises, eq(workoutExercises.workoutId, workouts.id))
+      .where(eq(workouts.userId, user.id))
+      .groupBy(
+        workouts.id,
+        workouts.dayType,
+        workouts.status,
+        workouts.startedAt,
+        workouts.completedAt,
+      )
+      .orderBy(desc(workouts.startedAt), desc(workouts.completedAt))
+
+    return rows
+  },
+)
+
+export const deleteWorkout = createServerFn({ method: 'POST' })
+  .validator((data: { workoutId: string }) => {
+    if (!data.workoutId) throw new Error('workoutId is required')
+    return data
+  })
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const deletedRows = await db
+      .delete(workouts)
+      .where(and(eq(workouts.id, data.workoutId), eq(workouts.userId, user.id)))
+      .returning()
+
+    if (!firstRow(deletedRows)) {
+      throw new Error('Workout not found')
+    }
+
+    return { ok: true as const }
+  })
+
 export const listFavorites = createServerFn({ method: 'GET' })
   .validator((data: { dayType: DayType }) => {
     if (!isDayType(data.dayType)) throw new Error('Invalid day type')
@@ -377,13 +465,7 @@ export const addExerciseToWorkout = createServerFn({ method: 'POST' })
     const workoutRows = await db
       .select()
       .from(workouts)
-      .where(
-        and(
-          eq(workouts.id, data.workoutId),
-          eq(workouts.userId, user.id),
-          eq(workouts.status, 'in_progress'),
-        ),
-      )
+      .where(and(eq(workouts.id, data.workoutId), eq(workouts.userId, user.id)))
       .limit(1)
 
     const workout = firstRow(workoutRows)
@@ -449,7 +531,6 @@ export const removeExerciseFromWorkout = createServerFn({ method: 'POST' })
         and(
           eq(workoutExercises.id, data.workoutExerciseId),
           eq(workouts.userId, user.id),
-          eq(workouts.status, 'in_progress'),
         ),
       )
       .limit(1)
@@ -505,8 +586,35 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
       .where(eq(workoutSets.workoutExerciseId, row.workoutExercise.id))
       .orderBy(asc(workoutSets.setIndex))
 
+    const [prefRows, settingsRows] = await Promise.all([
+      db
+        .select()
+        .from(userExerciseWeightPrefs)
+        .where(
+          and(
+            eq(userExerciseWeightPrefs.userId, user.id),
+            eq(userExerciseWeightPrefs.exerciseId, row.exercise.id),
+          ),
+        )
+        .limit(1),
+      db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, user.id))
+        .limit(1),
+    ])
+
+    const pref = firstRow(prefRows)
+    const settings = firstRow(settingsRows)
+    const weightInputType =
+      pref?.inputType ?? defaultWeightInputType(row.exercise.equipment)
+    const barWeightLbs = pref?.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS
+
     return {
       workout: row.workout,
+      bodyWeightLbs: settings?.bodyWeightLbs ?? null,
+      weightInputType,
+      barWeightLbs,
       workoutExercise: {
         id: row.workoutExercise.id,
         sortOrder: row.workoutExercise.sortOrder,
@@ -521,6 +629,101 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
     }
   })
 
+export const updateExerciseWeightPref = createServerFn({ method: 'POST' })
+  .validator(
+    (data: {
+      exerciseId: string
+      inputType: WeightInputType
+      barWeightLbs?: number | null
+    }) => {
+      if (!data.exerciseId) throw new Error('exerciseId is required')
+      if (!isWeightInputType(data.inputType)) {
+        throw new Error('Invalid weight input type')
+      }
+      if (
+        data.barWeightLbs !== undefined &&
+        data.barWeightLbs !== null &&
+        (typeof data.barWeightLbs !== 'number' ||
+          !Number.isFinite(data.barWeightLbs) ||
+          data.barWeightLbs < 0)
+      ) {
+        throw new Error('Invalid bar weight')
+      }
+      return data
+    },
+  )
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const exerciseRows = await db
+      .select({ id: exercises.id })
+      .from(exercises)
+      .where(eq(exercises.id, data.exerciseId))
+      .limit(1)
+
+    if (!firstRow(exerciseRows)) {
+      throw new Error('Exercise not found')
+    }
+
+    const existingRows = await db
+      .select()
+      .from(userExerciseWeightPrefs)
+      .where(
+        and(
+          eq(userExerciseWeightPrefs.userId, user.id),
+          eq(userExerciseWeightPrefs.exerciseId, data.exerciseId),
+        ),
+      )
+      .limit(1)
+
+    const existing = firstRow(existingRows)
+    const barWeightLbs =
+      data.barWeightLbs === undefined
+        ? (existing?.barWeightLbs ?? null)
+        : data.barWeightLbs
+
+    if (existing) {
+      const updatedRows = await db
+        .update(userExerciseWeightPrefs)
+        .set({
+          inputType: data.inputType,
+          barWeightLbs,
+        })
+        .where(
+          and(
+            eq(userExerciseWeightPrefs.userId, user.id),
+            eq(userExerciseWeightPrefs.exerciseId, data.exerciseId),
+          ),
+        )
+        .returning()
+
+      const updated = firstRow(updatedRows)
+      if (!updated) throw new Error('Failed to update weight preference')
+      return {
+        inputType: updated.inputType,
+        barWeightLbs: updated.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS,
+      }
+    }
+
+    const insertedRows = await db
+      .insert(userExerciseWeightPrefs)
+      .values({
+        userId: user.id,
+        exerciseId: data.exerciseId,
+        inputType: data.inputType,
+        barWeightLbs,
+      })
+      .returning()
+
+    const inserted = firstRow(insertedRows)
+    if (!inserted) throw new Error('Failed to create weight preference')
+    return {
+      inputType: inserted.inputType,
+      barWeightLbs: inserted.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS,
+    }
+  })
+
 export const updateSet = createServerFn({ method: 'POST' })
   .validator(
     (data: {
@@ -529,7 +732,12 @@ export const updateSet = createServerFn({ method: 'POST' })
       reps: number | null
     }) => {
       if (!data.setId) throw new Error('setId is required')
-      if (data.weight !== null && (typeof data.weight !== 'number' || data.weight < 0)) {
+      if (
+        data.weight !== null &&
+        (typeof data.weight !== 'number' ||
+          !Number.isFinite(data.weight) ||
+          data.weight < 0)
+      ) {
         throw new Error('Invalid weight')
       }
       if (
@@ -594,7 +802,6 @@ export const addSet = createServerFn({ method: 'POST' })
         and(
           eq(workoutExercises.id, data.workoutExerciseId),
           eq(workouts.userId, user.id),
-          eq(workouts.status, 'in_progress'),
         ),
       )
       .limit(1)
@@ -648,13 +855,7 @@ export const removeSet = createServerFn({ method: 'POST' })
         eq(workoutSets.workoutExerciseId, workoutExercises.id),
       )
       .innerJoin(workouts, eq(workoutExercises.workoutId, workouts.id))
-      .where(
-        and(
-          eq(workoutSets.id, data.setId),
-          eq(workouts.userId, user.id),
-          eq(workouts.status, 'in_progress'),
-        ),
-      )
+      .where(and(eq(workoutSets.id, data.setId), eq(workouts.userId, user.id)))
       .limit(1)
 
     const owned = firstRow(ownedRows)

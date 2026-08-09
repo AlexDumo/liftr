@@ -164,7 +164,11 @@ function WorkoutSelectionPage() {
     })
   }
 
+  const isCompleted = detail.workout.status === 'completed'
+
   const onDone = () => {
+    if (!window.confirm('Finish this workout day?')) return
+
     startTransition(async () => {
       setError(null)
       try {
@@ -190,14 +194,27 @@ function WorkoutSelectionPage() {
             Exercises
           </h1>
         </div>
-        <Button
-          size="lg"
-          disabled={isPending}
-          onClick={onDone}
-          className="min-w-20"
-        >
-          Done
-        </Button>
+        {isCompleted ? (
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={() => {
+              void navigate({ to: '/sessions' })
+            }}
+            className="min-w-20"
+          >
+            Back
+          </Button>
+        ) : (
+          <Button
+            size="lg"
+            disabled={isPending}
+            onClick={onDone}
+            className="min-w-20"
+          >
+            Done
+          </Button>
+        )}
       </header>
 
       {sessionExercises.length > 0 ? (

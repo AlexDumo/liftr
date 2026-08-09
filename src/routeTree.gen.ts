@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as SessionsRouteImport } from './routes/sessions'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as WorkoutWorkoutIdIndexRouteImport } from './routes/workout/$workoutId/index'
 import { Route as WorkoutWorkoutIdExerciseWorkoutExerciseIdRouteImport } from './routes/workout/$workoutId/exercise/$workoutExerciseId'
@@ -23,6 +25,16 @@ const IndexRoute = IndexRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsRoute = SessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -45,6 +57,8 @@ const WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/sessions': typeof SessionsRoute
+  '/settings': typeof SettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/workout/$workoutId/': typeof WorkoutWorkoutIdIndexRoute
   '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -52,6 +66,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/sessions': typeof SessionsRoute
+  '/settings': typeof SettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/workout/$workoutId': typeof WorkoutWorkoutIdIndexRoute
   '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -60,6 +76,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/sessions': typeof SessionsRoute
+  '/settings': typeof SettingsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/workout/$workoutId/': typeof WorkoutWorkoutIdIndexRoute
   '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -69,6 +87,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/sessions'
+    | '/settings'
     | '/api/auth/$'
     | '/workout/$workoutId/'
     | '/workout/$workoutId/exercise/$workoutExerciseId'
@@ -76,6 +96,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/sessions'
+    | '/settings'
     | '/api/auth/$'
     | '/workout/$workoutId'
     | '/workout/$workoutId/exercise/$workoutExerciseId'
@@ -83,6 +105,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/sessions'
+    | '/settings'
     | '/api/auth/$'
     | '/workout/$workoutId/'
     | '/workout/$workoutId/exercise/$workoutExerciseId'
@@ -91,6 +115,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  SessionsRoute: typeof SessionsRoute
+  SettingsRoute: typeof SettingsRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   WorkoutWorkoutIdIndexRoute: typeof WorkoutWorkoutIdIndexRoute
   WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute: typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -110,6 +136,20 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions': {
+      id: '/sessions'
+      path: '/sessions'
+      fullPath: '/sessions'
+      preLoaderRoute: typeof SessionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -139,6 +179,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  SessionsRoute: SessionsRoute,
+  SettingsRoute: SettingsRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   WorkoutWorkoutIdIndexRoute: WorkoutWorkoutIdIndexRoute,
   WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute:

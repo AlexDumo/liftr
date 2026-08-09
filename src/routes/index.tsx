@@ -4,9 +4,11 @@ import { useState, useTransition } from 'react'
 import { authClient } from '#/lib/auth-client'
 import { getSession } from '#/lib/auth-session'
 import { DAY_TYPE_BLURBS, DAY_TYPE_LABELS, DAY_TYPES } from '#/lib/day-types'
+import { formatLastWorkoutLabel } from '#/lib/format-last-workout'
 import {
   dayTypeLabels,
   getActiveWorkout,
+  getLastCompletedByDayType,
   startWorkout,
 } from '#/lib/workout.functions'
 import type { DayType } from '#/db/workout.schema'
@@ -23,15 +25,18 @@ export const Route = createFileRoute('/')({
     return { user: session.user }
   },
   loader: async () => {
-    const active = await getActiveWorkout()
-    return { active }
+    const [active, lastCompletedByDayType] = await Promise.all([
+      getActiveWorkout(),
+      getLastCompletedByDayType(),
+    ])
+    return { active, lastCompletedByDayType }
   },
   component: HomePage,
 })
 
 function HomePage() {
   const { user } = Route.useRouteContext()
-  const { active } = Route.useLoaderData()
+  const { active, lastCompletedByDayType } = Route.useLoaderData()
   const navigate = useNavigate()
   const startWorkoutFn = useServerFn(startWorkout)
   const [pendingDay, setPendingDay] = useState<DayType | null>(null)
@@ -66,19 +71,39 @@ function HomePage() {
             Pick a day and start lifting.
           </p>
         </div>
-        {!isDev ? (
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => {
-              void authClient.signOut().then(() => {
-                void navigate({ to: '/login' })
-              })
+              void navigate({ to: '/sessions' })
             }}
           >
-            Sign out
+            Sessions
           </Button>
-        ) : null}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void navigate({ to: '/settings' })
+            }}
+          >
+            Settings
+          </Button>
+          {!isDev ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                void authClient.signOut().then(() => {
+                  void navigate({ to: '/login' })
+                })
+              }}
+            >
+              Sign out
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       {active ? (
@@ -102,29 +127,47 @@ function HomePage() {
       ) : null}
 
       <div className="grid gap-3">
-        {DAY_TYPES.map((dayType) => (
-          <button
-            key={dayType}
-            type="button"
-            disabled={isPending}
-            onClick={() => begin(dayType)}
-            className="group border border-[var(--line)] bg-[var(--surface)] px-5 py-5 text-left transition-all hover:border-[var(--lagoon)] hover:bg-[var(--surface-strong)] disabled:opacity-60"
-          >
-            <span className="flex items-center justify-between gap-3">
-              <span>
-                <span className="block text-xl font-semibold text-[var(--sea-ink)]">
-                  {DAY_TYPE_LABELS[dayType]}
+        {DAY_TYPES.map((dayType) => {
+          const lastCompleted = lastCompletedByDayType[dayType]
+          return (
+            <button
+              key={dayType}
+              type="button"
+              disabled={isPending}
+              onClick={() => begin(dayType)}
+              className="group border border-[var(--line)] bg-[var(--surface)] px-5 py-5 text-left transition-all hover:border-[var(--lagoon)] hover:bg-[var(--surface-strong)] disabled:opacity-60"
+            >
+              <span className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="block text-xl font-semibold text-[var(--sea-ink)]">
+                    {DAY_TYPE_LABELS[dayType]}
+                  </span>
+                  <span className="mt-1 block text-sm text-[var(--sea-ink-soft)]">
+                    {DAY_TYPE_BLURBS[dayType]}
+                  </span>
                 </span>
-                <span className="mt-1 block text-sm text-[var(--sea-ink-soft)]">
-                  {DAY_TYPE_BLURBS[dayType]}
-                </span>
+                {pendingDay === dayType ? (
+                  <span className="shrink-0 text-sm font-medium text-[var(--lagoon-deep)]">
+                    Starting…
+                  </span>
+                ) : lastCompleted ? (
+                  <span className="shrink-0 text-right">
+                    <span className="block text-xs font-medium text-[var(--sea-ink-soft)]">
+                      Last done
+                    </span>
+                    <span className="mt-0.5 block text-xs text-[var(--sea-ink-soft)]">
+                      {formatLastWorkoutLabel(lastCompleted)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-sm font-medium text-[var(--lagoon-deep)] opacity-0 transition-opacity group-hover:opacity-100">
+                    Start
+                  </span>
+                )}
               </span>
-              <span className="text-sm font-medium text-[var(--lagoon-deep)] opacity-0 transition-opacity group-hover:opacity-100">
-                {pendingDay === dayType ? 'Starting…' : 'Start'}
-              </span>
-            </span>
-          </button>
-        ))}
+            </button>
+          )
+        })}
       </div>
     </main>
   )
