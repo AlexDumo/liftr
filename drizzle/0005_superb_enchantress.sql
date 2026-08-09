@@ -1,0 +1,1 @@
+ALTER TABLE `user_exercise_cardio_prefs` ADD `rate_mode` text DEFAULT 'minutes_per_unit' NOT NULL;

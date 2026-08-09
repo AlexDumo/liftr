@@ -22,6 +22,11 @@ export const weightInputTypeLabels: Record<WeightInputType, string> = {
   dumbbell: 'Dumbbell',
   barbell: 'Barbell',
   body: 'Body',
+  cardio: 'Cardio',
+}
+
+export function isCardioInputType(type: WeightInputType): boolean {
+  return type === 'cardio'
 }
 
 export function isWeightInputType(value: unknown): value is WeightInputType {
@@ -88,6 +93,8 @@ export function toPounds(
       }
       return context.bodyWeightLbs - fields.primary
     }
+    case 'cardio':
+      return null
   }
 }
 
@@ -130,6 +137,11 @@ export function fromPounds(
       }
       return { primary: context.bodyWeightLbs - pounds }
     }
+    case 'cardio':
+      return {
+        primary: null,
+        barWeightLbs: null,
+      }
   }
 }
 

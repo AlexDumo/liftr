@@ -37,6 +37,8 @@ function primaryLabel(type: WeightInputType): string {
       return 'One side'
     case 'body':
       return 'Assistance'
+    case 'cardio':
+      return 'Metric'
   }
 }
 
@@ -166,7 +168,7 @@ export function WeightInputTypeSelect({
         htmlFor="weight-input-type"
         className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--sea-ink-soft)] uppercase"
       >
-        Weight input
+        Input type
       </Label>
       <select
         id="weight-input-type"

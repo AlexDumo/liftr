@@ -29,6 +29,20 @@
       "when": 1786295259444,
       "tag": "0003_gifted_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786299036766,
+      "tag": "0004_red_iron_monger",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786299585854,
+      "tag": "0005_superb_enchantress",
+      "breakpoints": true
     }
   ]
 }

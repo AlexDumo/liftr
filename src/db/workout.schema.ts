@@ -21,8 +21,16 @@ export const weightInputTypes = [
   'dumbbell',
   'barbell',
   'body',
+  'cardio',
 ] as const
 export type WeightInputType = (typeof weightInputTypes)[number]
+
+export const cardioRateModes = [
+  'units_per_minute',
+  'minutes_per_unit',
+] as const
+export type CardioRateMode = (typeof cardioRateModes)[number]
+export const DEFAULT_CARDIO_RATE_MODE: CardioRateMode = 'minutes_per_unit'
 
 export const exercises = sqliteTable(
   'exercises',
@@ -96,6 +104,8 @@ export const workoutSets = sqliteTable(
     setIndex: integer('set_index').notNull(),
     weight: real('weight'),
     reps: integer('reps'),
+    metricValue: real('metric_value'),
+    durationSeconds: integer('duration_seconds'),
   },
   (table) => [
     index('workout_sets_workoutExerciseId_idx').on(table.workoutExerciseId),
@@ -160,6 +170,33 @@ export const userExerciseWeightPrefs = sqliteTable(
       columns: [table.userId, table.exerciseId],
     }),
     index('user_exercise_weight_prefs_user_idx').on(table.userId),
+  ],
+)
+
+export const userExerciseCardioPrefs = sqliteTable(
+  'user_exercise_cardio_prefs',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    exerciseId: text('exercise_id')
+      .notNull()
+      .references(() => exercises.id, { onDelete: 'cascade' }),
+    unitLabel: text('unit_label').notNull(),
+    rateMode: text('rate_mode')
+      .$type<CardioRateMode>()
+      .notNull()
+      .default(DEFAULT_CARDIO_RATE_MODE),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.exerciseId],
+    }),
+    index('user_exercise_cardio_prefs_user_idx').on(table.userId),
   ],
 )
 
@@ -228,6 +265,20 @@ export const userExerciseWeightPrefsRelations = relations(
     }),
     exercise: one(exercises, {
       fields: [userExerciseWeightPrefs.exerciseId],
+      references: [exercises.id],
+    }),
+  }),
+)
+
+export const userExerciseCardioPrefsRelations = relations(
+  userExerciseCardioPrefs,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userExerciseCardioPrefs.userId],
+      references: [users.id],
+    }),
+    exercise: one(exercises, {
+      fields: [userExerciseCardioPrefs.exerciseId],
       references: [exercises.id],
     }),
   }),

@@ -6,6 +6,7 @@ import {
   dayTypes,
   exerciseFavorites,
   exercises,
+  userExerciseCardioPrefs,
   userExerciseWeightPrefs,
   userSettings,
   workoutExercises,
@@ -13,6 +14,11 @@ import {
   workoutSets,
 } from '#/db/workout.schema'
 import type { DayType, WeightInputType } from '#/db/workout.schema'
+import {
+  DEFAULT_CARDIO_RATE_MODE,
+  isCardioRateMode,
+  type CardioRateMode,
+} from '#/lib/cardio-rate'
 import { getSession } from '#/lib/auth-session'
 import {
   DEFAULT_BAR_WEIGHT_LBS,
@@ -235,6 +241,8 @@ export const getWorkout = createServerFn({ method: 'GET' })
           setIndex: number
           weight: number | null
           reps: number | null
+          metricValue: number | null
+          durationSeconds: number | null
         }>
       }
     >()
@@ -256,6 +264,8 @@ export const getWorkout = createServerFn({ method: 'GET' })
           setIndex: row.set.setIndex,
           weight: row.set.weight,
           reps: row.set.reps,
+          metricValue: row.set.metricValue,
+          durationSeconds: row.set.durationSeconds,
         })
       }
     }
@@ -491,6 +501,25 @@ export const addExerciseToWorkout = createServerFn({ method: 'POST' })
 
     const existingCount = firstRow(countRows)?.value ?? 0
 
+    const prefRows = await db
+      .select()
+      .from(userExerciseWeightPrefs)
+      .where(
+        and(
+          eq(userExerciseWeightPrefs.userId, user.id),
+          eq(userExerciseWeightPrefs.exerciseId, exercise.id),
+        ),
+      )
+      .limit(1)
+
+    const pref = firstRow(prefRows)
+    const inputType =
+      pref?.inputType ??
+      (workout.dayType === 'cardio'
+        ? 'cardio'
+        : defaultWeightInputType(exercise.equipment))
+    const initialSetCount = inputType === 'cardio' ? 1 : 3
+
     const workoutExerciseId = createId()
     await db.insert(workoutExercises).values({
       id: workoutExerciseId,
@@ -500,7 +529,7 @@ export const addExerciseToWorkout = createServerFn({ method: 'POST' })
     })
 
     await db.insert(workoutSets).values(
-      [0, 1, 2].map((setIndex) => ({
+      Array.from({ length: initialSetCount }, (_, setIndex) => ({
         id: createId(),
         workoutExerciseId,
         setIndex,
@@ -586,7 +615,7 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
       .where(eq(workoutSets.workoutExerciseId, row.workoutExercise.id))
       .orderBy(asc(workoutSets.setIndex))
 
-    const [prefRows, settingsRows] = await Promise.all([
+    const [prefRows, cardioPrefRows, settingsRows] = await Promise.all([
       db
         .select()
         .from(userExerciseWeightPrefs)
@@ -599,22 +628,39 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
         .limit(1),
       db
         .select()
+        .from(userExerciseCardioPrefs)
+        .where(
+          and(
+            eq(userExerciseCardioPrefs.userId, user.id),
+            eq(userExerciseCardioPrefs.exerciseId, row.exercise.id),
+          ),
+        )
+        .limit(1),
+      db
+        .select()
         .from(userSettings)
         .where(eq(userSettings.userId, user.id))
         .limit(1),
     ])
 
     const pref = firstRow(prefRows)
+    const cardioPref = firstRow(cardioPrefRows)
     const settings = firstRow(settingsRows)
     const weightInputType =
-      pref?.inputType ?? defaultWeightInputType(row.exercise.equipment)
+      pref?.inputType ??
+      (row.workout.dayType === 'cardio'
+        ? 'cardio'
+        : defaultWeightInputType(row.exercise.equipment))
     const barWeightLbs = pref?.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS
 
     return {
       workout: row.workout,
+      dayType: row.workout.dayType,
       bodyWeightLbs: settings?.bodyWeightLbs ?? null,
       weightInputType,
       barWeightLbs,
+      cardioUnitLabel: cardioPref?.unitLabel ?? '',
+      cardioRateMode: cardioPref?.rateMode ?? DEFAULT_CARDIO_RATE_MODE,
       workoutExercise: {
         id: row.workoutExercise.id,
         sortOrder: row.workoutExercise.sortOrder,
@@ -624,6 +670,8 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
           setIndex: set.setIndex,
           weight: set.weight,
           reps: set.reps,
+          metricValue: set.metricValue,
+          durationSeconds: set.durationSeconds,
         })),
       },
     }
@@ -724,29 +772,170 @@ export const updateExerciseWeightPref = createServerFn({ method: 'POST' })
     }
   })
 
-export const updateSet = createServerFn({ method: 'POST' })
+export const updateExerciseCardioPref = createServerFn({ method: 'POST' })
   .validator(
     (data: {
-      setId: string
-      weight: number | null
-      reps: number | null
+      exerciseId: string
+      unitLabel?: string
+      rateMode?: CardioRateMode
     }) => {
+      if (!data.exerciseId) throw new Error('exerciseId is required')
+
+      const hasUnitLabel = data.unitLabel !== undefined
+      const hasRateMode = data.rateMode !== undefined
+      if (!hasUnitLabel && !hasRateMode) {
+        throw new Error('unitLabel or rateMode is required')
+      }
+
+      let unitLabel: string | undefined
+      if (hasUnitLabel) {
+        if (typeof data.unitLabel !== 'string') {
+          throw new Error('Invalid unit label')
+        }
+        unitLabel = data.unitLabel.trim()
+        if (!unitLabel) throw new Error('Unit label is required')
+      }
+
+      let rateMode: CardioRateMode | undefined
+      if (hasRateMode) {
+        if (!isCardioRateMode(data.rateMode)) {
+          throw new Error('Invalid rate mode')
+        }
+        rateMode = data.rateMode
+      }
+
+      return { exerciseId: data.exerciseId, unitLabel, rateMode }
+    },
+  )
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const exerciseRows = await db
+      .select({ id: exercises.id })
+      .from(exercises)
+      .where(eq(exercises.id, data.exerciseId))
+      .limit(1)
+
+    if (!firstRow(exerciseRows)) {
+      throw new Error('Exercise not found')
+    }
+
+    const existingRows = await db
+      .select()
+      .from(userExerciseCardioPrefs)
+      .where(
+        and(
+          eq(userExerciseCardioPrefs.userId, user.id),
+          eq(userExerciseCardioPrefs.exerciseId, data.exerciseId),
+        ),
+      )
+      .limit(1)
+
+    const existing = firstRow(existingRows)
+    const unitLabel =
+      data.unitLabel ?? existing?.unitLabel ?? ''
+    if (!unitLabel) {
+      throw new Error('Unit label is required')
+    }
+    const rateMode =
+      data.rateMode ?? existing?.rateMode ?? DEFAULT_CARDIO_RATE_MODE
+
+    if (existing) {
+      const updatedRows = await db
+        .update(userExerciseCardioPrefs)
+        .set({ unitLabel, rateMode })
+        .where(
+          and(
+            eq(userExerciseCardioPrefs.userId, user.id),
+            eq(userExerciseCardioPrefs.exerciseId, data.exerciseId),
+          ),
+        )
+        .returning()
+
+      const updated = firstRow(updatedRows)
+      if (!updated) throw new Error('Failed to update cardio preference')
+      return {
+        unitLabel: updated.unitLabel,
+        rateMode: updated.rateMode,
+      }
+    }
+
+    const insertedRows = await db
+      .insert(userExerciseCardioPrefs)
+      .values({
+        userId: user.id,
+        exerciseId: data.exerciseId,
+        unitLabel,
+        rateMode,
+      })
+      .returning()
+
+    const inserted = firstRow(insertedRows)
+    if (!inserted) throw new Error('Failed to create cardio preference')
+    return {
+      unitLabel: inserted.unitLabel,
+      rateMode: inserted.rateMode,
+    }
+  })
+
+export const updateSet = createServerFn({ method: 'POST' })
+  .validator(
+    (
+      data:
+        | {
+            setId: string
+            mode: 'strength'
+            weight: number | null
+            reps: number | null
+          }
+        | {
+            setId: string
+            mode: 'cardio'
+            metricValue: number | null
+            durationSeconds: number | null
+          },
+    ) => {
       if (!data.setId) throw new Error('setId is required')
+      if (data.mode !== 'strength' && data.mode !== 'cardio') {
+        throw new Error('Invalid set mode')
+      }
+
+      if (data.mode === 'strength') {
+        if (
+          data.weight !== null &&
+          (typeof data.weight !== 'number' ||
+            !Number.isFinite(data.weight) ||
+            data.weight < 0)
+        ) {
+          throw new Error('Invalid weight')
+        }
+        if (
+          data.reps !== null &&
+          (typeof data.reps !== 'number' ||
+            !Number.isInteger(data.reps) ||
+            data.reps < 0)
+        ) {
+          throw new Error('Invalid reps')
+        }
+        return data
+      }
+
       if (
-        data.weight !== null &&
-        (typeof data.weight !== 'number' ||
-          !Number.isFinite(data.weight) ||
-          data.weight < 0)
+        data.metricValue !== null &&
+        (typeof data.metricValue !== 'number' ||
+          !Number.isFinite(data.metricValue) ||
+          data.metricValue < 0)
       ) {
-        throw new Error('Invalid weight')
+        throw new Error('Invalid metric value')
       }
       if (
-        data.reps !== null &&
-        (typeof data.reps !== 'number' ||
-          !Number.isInteger(data.reps) ||
-          data.reps < 0)
+        data.durationSeconds !== null &&
+        (typeof data.durationSeconds !== 'number' ||
+          !Number.isInteger(data.durationSeconds) ||
+          data.durationSeconds < 0)
       ) {
-        throw new Error('Invalid reps')
+        throw new Error('Invalid duration')
       }
       return data
     },
@@ -770,9 +959,24 @@ export const updateSet = createServerFn({ method: 'POST' })
       throw new Error('Set not found')
     }
 
+    const patch =
+      data.mode === 'strength'
+        ? {
+            weight: data.weight,
+            reps: data.reps,
+            metricValue: null,
+            durationSeconds: null,
+          }
+        : {
+            weight: null,
+            reps: null,
+            metricValue: data.metricValue,
+            durationSeconds: data.durationSeconds,
+          }
+
     const updatedRows = await db
       .update(workoutSets)
-      .set({ weight: data.weight, reps: data.reps })
+      .set(patch)
       .where(eq(workoutSets.id, data.setId))
       .returning()
 
