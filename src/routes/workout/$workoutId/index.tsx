@@ -12,7 +12,9 @@ import { DAY_TYPE_LABELS } from '#/lib/day-types'
 import {
   addExerciseToWorkout,
   completeWorkout,
+  createCustomExercise,
   getWorkout,
+  listCustomExercises,
   listFavorites,
   removeExerciseFromWorkout,
   searchExercises,
@@ -34,23 +36,33 @@ export const Route = createFileRoute('/workout/$workoutId/')({
   },
   loader: async ({ params }) => {
     const detail = await getWorkout({ data: { workoutId: params.workoutId } })
-    const favorites = await listFavorites({
-      data: { dayType: detail.workout.dayType },
-    })
-    return { detail, favorites }
+    const [favorites, customExercises] = await Promise.all([
+      listFavorites({
+        data: { dayType: detail.workout.dayType },
+      }),
+      listCustomExercises({
+        data: { dayType: detail.workout.dayType },
+      }),
+    ])
+    return { detail, favorites, customExercises }
   },
   component: WorkoutSelectionPage,
 })
 
 function WorkoutSelectionPage() {
   const { workoutId } = Route.useParams()
-  const { detail, favorites: initialFavorites } = Route.useLoaderData()
+  const {
+    detail,
+    favorites: initialFavorites,
+    customExercises: initialCustomExercises,
+  } = Route.useLoaderData()
   const navigate = useNavigate()
   const router = useRouter()
 
   const searchExercisesFn = useServerFn(searchExercises)
   const toggleFavoriteFn = useServerFn(toggleFavorite)
   const addExerciseFn = useServerFn(addExerciseToWorkout)
+  const createCustomExerciseFn = useServerFn(createCustomExercise)
   const removeExerciseFn = useServerFn(removeExerciseFromWorkout)
   const completeWorkoutFn = useServerFn(completeWorkout)
 
@@ -59,6 +71,11 @@ function WorkoutSelectionPage() {
   const [results, setResults] = useState<ExerciseListItemData[]>([])
   const [favorites, setFavorites] =
     useState<ExerciseListItemData[]>(initialFavorites)
+  const [customExercises, setCustomExercises] = useState<ExerciseListItemData[]>(
+    initialCustomExercises,
+  )
+  const [showAddCustom, setShowAddCustom] = useState(false)
+  const [customName, setCustomName] = useState('')
   const [isPending, startTransition] = useTransition()
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -66,6 +83,10 @@ function WorkoutSelectionPage() {
   useEffect(() => {
     setFavorites(initialFavorites)
   }, [initialFavorites])
+
+  useEffect(() => {
+    setCustomExercises(initialCustomExercises)
+  }, [initialCustomExercises])
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -127,8 +148,68 @@ function WorkoutSelectionPage() {
             item.id === exercise.id ? { ...item, favorited } : item,
           ),
         )
+
+        setCustomExercises((prev) =>
+          prev.map((item) =>
+            item.id === exercise.id ? { ...item, favorited } : item,
+          ),
+        )
       } catch {
         setError('Could not update favorite')
+      }
+    })
+  }
+
+  const isCompleted = detail.workout.status === 'completed'
+
+  const onCreateCustomExercise = (
+    name: string,
+    options?: { addToSession?: boolean; clearSearch?: boolean },
+  ) => {
+    const trimmedName = name.trim()
+    if (!trimmedName) return
+
+    startTransition(async () => {
+      setError(null)
+      try {
+        const { exercise, workoutExerciseId } = await createCustomExerciseFn({
+          data: {
+            name: trimmedName,
+            dayType: detail.workout.dayType,
+            addToWorkoutId:
+              options?.addToSession && !isCompleted ? workoutId : undefined,
+          },
+        })
+
+        setCustomExercises((prev) => {
+          if (prev.some((item) => item.id === exercise.id)) return prev
+          return [...prev, exercise].sort((a, b) => a.name.localeCompare(b.name))
+        })
+
+        if (!favorites.some((item) => item.id === exercise.id)) {
+          setFavorites((prev) =>
+            [...prev, exercise].sort((a, b) => a.name.localeCompare(b.name)),
+          )
+        }
+
+        setCustomName('')
+        setShowAddCustom(false)
+        if (options?.clearSearch) {
+          setQuery('')
+          setDebouncedQuery('')
+        }
+
+        if (workoutExerciseId) {
+          await navigate({
+            to: '/workout/$workoutId/exercise/$workoutExerciseId',
+            params: { workoutId, workoutExerciseId },
+          })
+          return
+        }
+
+        await router.invalidate()
+      } catch {
+        setError('Could not create custom exercise')
       }
     })
   }
@@ -164,7 +245,7 @@ function WorkoutSelectionPage() {
     })
   }
 
-  const isCompleted = detail.workout.status === 'completed'
+  const sessionExercises = detail.exercises
 
   const onDone = () => {
     if (!window.confirm('Finish this workout day?')) return
@@ -180,8 +261,6 @@ function WorkoutSelectionPage() {
       }
     })
   }
-
-  const sessionExercises = detail.exercises
 
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-lg flex-col px-4 py-6">
@@ -289,9 +368,26 @@ function WorkoutSelectionPage() {
           </h2>
           <div className="border border-[var(--line)] bg-[var(--surface)]">
             {results.length === 0 && !searching ? (
-              <p className="px-3 py-6 text-sm text-[var(--sea-ink-soft)]">
-                No exercises match “{debouncedQuery}”.
-              </p>
+              <div className="px-3 py-6">
+                <p className="text-sm text-[var(--sea-ink-soft)]">
+                  No exercises match “{debouncedQuery}”.
+                </p>
+                {!isCompleted ? (
+                  <Button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() =>
+                      onCreateCustomExercise(debouncedQuery, {
+                        addToSession: true,
+                        clearSearch: true,
+                      })
+                    }
+                    className="mt-4 w-full"
+                  >
+                    Add “{debouncedQuery}” as custom exercise
+                  </Button>
+                ) : null}
+              </div>
             ) : (
               results.map((exercise) => (
                 <ExerciseListItem
@@ -306,29 +402,100 @@ function WorkoutSelectionPage() {
           </div>
         </section>
       ) : (
-        <section>
-          <h2 className="mb-2 text-xs font-semibold tracking-wide text-[var(--sea-ink-soft)] uppercase">
-            Favorites for {DAY_TYPE_LABELS[detail.workout.dayType]}
-          </h2>
-          <div className="border border-[var(--line)] bg-[var(--surface)]">
-            {favorites.length === 0 ? (
-              <p className="px-3 py-6 text-sm text-[var(--sea-ink-soft)]">
-                No favorites yet. Search for an exercise and tap the star to
-                bookmark it for this day type.
-              </p>
-            ) : (
-              favorites.map((exercise) => (
-                <ExerciseListItem
-                  key={exercise.id}
-                  exercise={exercise}
-                  busy={isPending}
-                  onSelect={() => onSelectExercise(exercise.id)}
-                  onToggleFavorite={() => onToggleFavorite(exercise)}
-                />
-              ))
-            )}
-          </div>
-        </section>
+        <>
+          <section className="mb-6">
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-[var(--sea-ink-soft)] uppercase">
+              Favorites for {DAY_TYPE_LABELS[detail.workout.dayType]}
+            </h2>
+            <div className="border border-[var(--line)] bg-[var(--surface)]">
+              {favorites.length === 0 ? (
+                <p className="px-3 py-6 text-sm text-[var(--sea-ink-soft)]">
+                  No favorites yet. Search for an exercise and tap the star to
+                  bookmark it for this day type.
+                </p>
+              ) : (
+                favorites.map((exercise) => (
+                  <ExerciseListItem
+                    key={exercise.id}
+                    exercise={exercise}
+                    busy={isPending}
+                    onSelect={() => onSelectExercise(exercise.id)}
+                    onToggleFavorite={() => onToggleFavorite(exercise)}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-[var(--sea-ink-soft)] uppercase">
+              Your custom exercises
+            </h2>
+            <div className="border border-[var(--line)] bg-[var(--surface)]">
+              {customExercises.length === 0 ? (
+                <p className="px-3 py-6 text-sm text-[var(--sea-ink-soft)]">
+                  Can&apos;t find a movement? Search for it, or add a custom
+                  exercise below.
+                </p>
+              ) : (
+                customExercises.map((exercise) => (
+                  <ExerciseListItem
+                    key={exercise.id}
+                    exercise={exercise}
+                    busy={isPending}
+                    onSelect={() => onSelectExercise(exercise.id)}
+                    onToggleFavorite={() => onToggleFavorite(exercise)}
+                  />
+                ))
+              )}
+            </div>
+            {!isCompleted ? (
+              showAddCustom ? (
+                <form
+                  className="mt-3 flex gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    onCreateCustomExercise(customName, { addToSession: true })
+                  }}
+                >
+                  <Input
+                    value={customName}
+                    onChange={(event) => setCustomName(event.target.value)}
+                    placeholder="Exercise name"
+                    className="h-10 flex-1 text-sm"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoFocus
+                  />
+                  <Button type="submit" disabled={isPending || !customName.trim()}>
+                    Add
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={isPending}
+                    onClick={() => {
+                      setShowAddCustom(false)
+                      setCustomName('')
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </form>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isPending}
+                  onClick={() => setShowAddCustom(true)}
+                  className="mt-3 w-full"
+                >
+                  Add custom exercise
+                </Button>
+              )
+            ) : null}
+          </section>
+        </>
       )}
     </main>
   )

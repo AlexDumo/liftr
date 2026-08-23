@@ -36,6 +36,7 @@ export const exercises = sqliteTable(
   'exercises',
   {
     id: text('id').primaryKey(),
+    userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     force: text('force'),
     level: text('level').notNull(),
@@ -47,7 +48,10 @@ export const exercises = sqliteTable(
     instructions: text('instructions').notNull(),
     images: text('images').notNull(),
   },
-  (table) => [index('exercises_name_idx').on(table.name)],
+  (table) => [
+    index('exercises_name_idx').on(table.name),
+    index('exercises_userId_name_idx').on(table.userId, table.name),
+  ],
 )
 
 export const workouts = sqliteTable(
@@ -200,7 +204,11 @@ export const userExerciseCardioPrefs = sqliteTable(
   ],
 )
 
-export const exercisesRelations = relations(exercises, ({ many }) => ({
+export const exercisesRelations = relations(exercises, ({ one, many }) => ({
+  user: one(users, {
+    fields: [exercises.userId],
+    references: [users.id],
+  }),
   workoutExercises: many(workoutExercises),
   favorites: many(exerciseFavorites),
 }))

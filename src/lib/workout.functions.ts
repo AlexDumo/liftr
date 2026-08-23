@@ -1,6 +1,6 @@
 import { redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { and, asc, count, desc, eq, like } from 'drizzle-orm'
+import { and, asc, count, desc, eq, like, or, isNull } from 'drizzle-orm'
 import { getDb } from '#/db'
 import {
   dayTypes,
@@ -29,6 +29,7 @@ import {
   defaultWeightInputType,
   isWeightInputType,
 } from '#/lib/weight-input'
+import { validateCustomExerciseName } from '#/lib/custom-exercise'
 
 const IMAGE_BASE =
   'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/'
@@ -91,6 +92,63 @@ async function maybeAutoCompleteStaleWorkout(
     .returning()
 
   return firstRow(updatedRows) ?? workout
+}
+
+function exerciseVisibleToUser(userId: string) {
+  return or(isNull(exercises.userId), eq(exercises.userId, userId))
+}
+
+async function insertExerciseIntoWorkout(
+  db: ReturnType<typeof getDb>,
+  user: { id: string },
+  workout: typeof workouts.$inferSelect,
+  exercise: typeof exercises.$inferSelect,
+) {
+  const countRows = await db
+    .select({ value: count() })
+    .from(workoutExercises)
+    .where(eq(workoutExercises.workoutId, workout.id))
+
+  const existingCount = firstRow(countRows)?.value ?? 0
+
+  const prefRows = await db
+    .select()
+    .from(userExerciseWeightPrefs)
+    .where(
+      and(
+        eq(userExerciseWeightPrefs.userId, user.id),
+        eq(userExerciseWeightPrefs.exerciseId, exercise.id),
+      ),
+    )
+    .limit(1)
+
+  const pref = firstRow(prefRows)
+  const inputType =
+    pref?.inputType ??
+    (workout.dayType === 'cardio'
+      ? 'cardio'
+      : defaultWeightInputType(exercise.equipment))
+  const initialSetCount = inputType === 'cardio' ? 1 : 3
+
+  const workoutExerciseId = createId()
+  await db.insert(workoutExercises).values({
+    id: workoutExerciseId,
+    workoutId: workout.id,
+    exerciseId: exercise.id,
+    sortOrder: Number(existingCount),
+  })
+
+  await db.insert(workoutSets).values(
+    Array.from({ length: initialSetCount }, (_, setIndex) => ({
+      id: createId(),
+      workoutExerciseId,
+      setIndex,
+      weight: null,
+      reps: null,
+    })),
+  )
+
+  return { workoutExerciseId }
 }
 
 function mapExerciseRow(
@@ -416,6 +474,119 @@ export const listFavorites = createServerFn({ method: 'GET' })
     return rows.map((row) => mapExerciseRow(row.exercise, true))
   })
 
+export const listCustomExercises = createServerFn({ method: 'GET' })
+  .validator((data: { dayType: DayType }) => {
+    if (!isDayType(data.dayType)) throw new Error('Invalid day type')
+    return data
+  })
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const rows = await db
+      .select({
+        exercise: exercises,
+        favoriteUserId: exerciseFavorites.userId,
+      })
+      .from(exercises)
+      .leftJoin(
+        exerciseFavorites,
+        and(
+          eq(exerciseFavorites.exerciseId, exercises.id),
+          eq(exerciseFavorites.userId, user.id),
+          eq(exerciseFavorites.dayType, data.dayType),
+        ),
+      )
+      .where(eq(exercises.userId, user.id))
+      .orderBy(asc(exercises.name))
+
+    return rows.map((row) =>
+      mapExerciseRow(row.exercise, Boolean(row.favoriteUserId)),
+    )
+  })
+
+export const createCustomExercise = createServerFn({ method: 'POST' })
+  .validator(
+    (data: { name: string; dayType: DayType; addToWorkoutId?: string }) => {
+      if (!isDayType(data.dayType)) throw new Error('Invalid day type')
+      const name = validateCustomExerciseName(data.name)
+      if (data.addToWorkoutId !== undefined && !data.addToWorkoutId) {
+        throw new Error('addToWorkoutId is required when provided')
+      }
+      return {
+        name,
+        dayType: data.dayType,
+        addToWorkoutId: data.addToWorkoutId,
+      }
+    },
+  )
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const exerciseId = createId()
+    const createdRows = await db
+      .insert(exercises)
+      .values({
+        id: exerciseId,
+        userId: user.id,
+        name: data.name,
+        force: null,
+        level: 'beginner',
+        mechanic: null,
+        equipment: null,
+        category: 'custom',
+        primaryMuscles: '[]',
+        secondaryMuscles: '[]',
+        instructions: '[]',
+        images: '[]',
+      })
+      .returning()
+
+    const exercise = firstRow(createdRows)
+    if (!exercise) {
+      throw new Error('Failed to create custom exercise')
+    }
+
+    await db.insert(exerciseFavorites).values({
+      userId: user.id,
+      exerciseId: exercise.id,
+      dayType: data.dayType,
+    })
+
+    let workoutExerciseId: string | undefined
+    if (data.addToWorkoutId) {
+      const workoutRows = await db
+        .select()
+        .from(workouts)
+        .where(
+          and(
+            eq(workouts.id, data.addToWorkoutId),
+            eq(workouts.userId, user.id),
+          ),
+        )
+        .limit(1)
+
+      const workout = firstRow(workoutRows)
+      if (!workout) {
+        throw new Error('Workout not found')
+      }
+
+      const result = await insertExerciseIntoWorkout(
+        db,
+        user,
+        workout,
+        exercise,
+      )
+      workoutExerciseId = result.workoutExerciseId
+    }
+
+    return {
+      exercise: mapExerciseRow(exercise, true),
+      workoutExerciseId,
+    }
+  })
+
 export const searchExercises = createServerFn({ method: 'GET' })
   .validator((data: { query: string; dayType: DayType }) => {
     if (!isDayType(data.dayType)) throw new Error('Invalid day type')
@@ -445,7 +616,7 @@ export const searchExercises = createServerFn({ method: 'GET' })
           eq(exerciseFavorites.dayType, data.dayType),
         ),
       )
-      .where(like(exercises.name, pattern))
+      .where(and(like(exercises.name, pattern), exerciseVisibleToUser(user.id)))
       .orderBy(asc(exercises.name))
       .limit(40)
 
@@ -522,7 +693,12 @@ export const addExerciseToWorkout = createServerFn({ method: 'POST' })
     const exerciseRows = await db
       .select()
       .from(exercises)
-      .where(eq(exercises.id, data.exerciseId))
+      .where(
+        and(
+          eq(exercises.id, data.exerciseId),
+          exerciseVisibleToUser(user.id),
+        ),
+      )
       .limit(1)
 
     const exercise = firstRow(exerciseRows)
@@ -530,51 +706,7 @@ export const addExerciseToWorkout = createServerFn({ method: 'POST' })
       throw new Error('Exercise not found')
     }
 
-    const countRows = await db
-      .select({ value: count() })
-      .from(workoutExercises)
-      .where(eq(workoutExercises.workoutId, workout.id))
-
-    const existingCount = firstRow(countRows)?.value ?? 0
-
-    const prefRows = await db
-      .select()
-      .from(userExerciseWeightPrefs)
-      .where(
-        and(
-          eq(userExerciseWeightPrefs.userId, user.id),
-          eq(userExerciseWeightPrefs.exerciseId, exercise.id),
-        ),
-      )
-      .limit(1)
-
-    const pref = firstRow(prefRows)
-    const inputType =
-      pref?.inputType ??
-      (workout.dayType === 'cardio'
-        ? 'cardio'
-        : defaultWeightInputType(exercise.equipment))
-    const initialSetCount = inputType === 'cardio' ? 1 : 3
-
-    const workoutExerciseId = createId()
-    await db.insert(workoutExercises).values({
-      id: workoutExerciseId,
-      workoutId: workout.id,
-      exerciseId: exercise.id,
-      sortOrder: Number(existingCount),
-    })
-
-    await db.insert(workoutSets).values(
-      Array.from({ length: initialSetCount }, (_, setIndex) => ({
-        id: createId(),
-        workoutExerciseId,
-        setIndex,
-        weight: null,
-        reps: null,
-      })),
-    )
-
-    return { workoutExerciseId }
+    return insertExerciseIntoWorkout(db, user, workout, exercise)
   })
 
 export const removeExerciseFromWorkout = createServerFn({ method: 'POST' })
