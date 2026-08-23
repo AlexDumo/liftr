@@ -605,32 +605,47 @@ function ExerciseLoggingPage() {
           data: { workoutExerciseId },
         })
         if (isCardio) {
-          setCardioSets((prev) => [
-            ...prev,
-            {
-              id: created.id,
-              setIndex: created.setIndex,
-              metric: '',
-              duration: '',
+          const last = cardioSets[cardioSets.length - 1]
+          const newDraft: CardioSetDraft = {
+            id: created.id,
+            setIndex: created.setIndex,
+            metric: last?.metric ?? '',
+            duration: last?.duration ?? '',
+          }
+          setCardioSets((prev) => [...prev, newDraft])
+          await updateSetFn({
+            data: {
+              setId: newDraft.id,
+              mode: 'cardio',
+              metricValue: parseOptionalNumber(newDraft.metric),
+              durationSeconds: parseDurationMmSs(newDraft.duration),
             },
-          ])
+          })
         } else {
-          const fields = fieldsToStrings(
-            fromPounds(inputType, null, {
-              bodyWeightLbs: data.bodyWeightLbs,
-              barWeightLbs: resolvedBarWeightLbs,
-            }),
+          const last = strengthSets[strengthSets.length - 1]
+          const newDraft: StrengthSetDraft = {
+            id: created.id,
+            setIndex: created.setIndex,
+            primary: last?.primary ?? '',
+            reps: last?.reps ?? '',
+          }
+          setStrengthSets((prev) => [...prev, newDraft])
+          const pounds = computeDraftPounds(
+            inputType,
+            { primary: newDraft.primary },
+            data.bodyWeightLbs,
+            resolvedBarWeightLbs,
           )
-          setStrengthSets((prev) => [
-            ...prev,
-            {
-              id: created.id,
-              setIndex: created.setIndex,
-              primary: fields.primary,
-              reps: '',
+          await updateSetFn({
+            data: {
+              setId: newDraft.id,
+              mode: 'strength',
+              weight: pounds,
+              reps: parseOptionalInt(newDraft.reps),
             },
-          ])
+          })
         }
+        setCurrentSetIndex(sets.length)
         await router.invalidate()
       } catch {
         setError('Could not add set')

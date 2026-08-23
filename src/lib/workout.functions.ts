@@ -1059,14 +1059,25 @@ export const addSet = createServerFn({ method: 'POST' })
 
     const setCount = firstRow(countRows)?.value ?? 0
 
+    const lastSetRows = await db
+      .select()
+      .from(workoutSets)
+      .where(eq(workoutSets.workoutExerciseId, data.workoutExerciseId))
+      .orderBy(desc(workoutSets.setIndex))
+      .limit(1)
+
+    const lastSet = firstRow(lastSetRows)
+
     const createdRows = await db
       .insert(workoutSets)
       .values({
         id: createId(),
         workoutExerciseId: data.workoutExerciseId,
         setIndex: Number(setCount),
-        weight: null,
-        reps: null,
+        weight: lastSet?.weight ?? null,
+        reps: lastSet?.reps ?? null,
+        metricValue: lastSet?.metricValue ?? null,
+        durationSeconds: lastSet?.durationSeconds ?? null,
       })
       .returning()
 
