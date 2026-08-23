@@ -21,6 +21,10 @@ import {
 } from '#/lib/cardio-rate'
 import { getSession } from '#/lib/auth-session'
 import {
+  completionTimestampForStaleWorkout,
+  isStaleWorkout,
+} from '#/lib/workout-auto-complete'
+import {
   DEFAULT_BAR_WEIGHT_LBS,
   defaultWeightInputType,
   isWeightInputType,
@@ -68,6 +72,25 @@ async function requireUser() {
     throw redirect({ to: '/login' })
   }
   return session.user
+}
+
+async function maybeAutoCompleteStaleWorkout(
+  db: ReturnType<typeof getDb>,
+  workout: typeof workouts.$inferSelect,
+  now: Date = new Date(),
+): Promise<typeof workouts.$inferSelect> {
+  if (workout.status !== 'in_progress') return workout
+  if (!isStaleWorkout(workout.startedAt, now)) return workout
+
+  const updatedRows = await db
+    .update(workouts)
+    .set({ status: 'completed', completedAt: workout.startedAt })
+    .where(
+      and(eq(workouts.id, workout.id), eq(workouts.status, 'in_progress')),
+    )
+    .returning()
+
+  return firstRow(updatedRows) ?? workout
 }
 
 function mapExerciseRow(
@@ -170,12 +193,23 @@ export const startWorkout = createServerFn({ method: 'POST' })
     }
 
     // One in-progress workout at a time: complete others for this user.
-    await db
-      .update(workouts)
-      .set({ status: 'completed', completedAt: new Date() })
+    const inProgressRows = await db
+      .select()
+      .from(workouts)
       .where(
         and(eq(workouts.userId, user.id), eq(workouts.status, 'in_progress')),
       )
+
+    const now = new Date()
+    for (const row of inProgressRows) {
+      await db
+        .update(workouts)
+        .set({
+          status: 'completed',
+          completedAt: completionTimestampForStaleWorkout(row.startedAt, now),
+        })
+        .where(eq(workouts.id, row.id))
+    }
 
     const id = createId()
     const createdRows = await db
@@ -215,6 +249,8 @@ export const getWorkout = createServerFn({ method: 'GET' })
       throw new Error('Workout not found')
     }
 
+    const resolvedWorkout = await maybeAutoCompleteStaleWorkout(db, workout)
+
     const rows = await db
       .select({
         workoutExercise: workoutExercises,
@@ -227,7 +263,7 @@ export const getWorkout = createServerFn({ method: 'GET' })
         workoutSets,
         eq(workoutSets.workoutExerciseId, workoutExercises.id),
       )
-      .where(eq(workoutExercises.workoutId, workout.id))
+      .where(eq(workoutExercises.workoutId, resolvedWorkout.id))
       .orderBy(asc(workoutExercises.sortOrder), asc(workoutSets.setIndex))
 
     const byExercise = new Map<
@@ -271,7 +307,7 @@ export const getWorkout = createServerFn({ method: 'GET' })
     }
 
     return {
-      workout,
+      workout: resolvedWorkout,
       exercises: [...byExercise.values()],
     }
   })
@@ -609,6 +645,8 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
       throw new Error('Workout exercise not found')
     }
 
+    const workout = await maybeAutoCompleteStaleWorkout(db, row.workout)
+
     const sets = await db
       .select()
       .from(workoutSets)
@@ -648,14 +686,14 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
     const settings = firstRow(settingsRows)
     const weightInputType =
       pref?.inputType ??
-      (row.workout.dayType === 'cardio'
+      (workout.dayType === 'cardio'
         ? 'cardio'
         : defaultWeightInputType(row.exercise.equipment))
     const barWeightLbs = pref?.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS
 
     return {
-      workout: row.workout,
-      dayType: row.workout.dayType,
+      workout,
+      dayType: workout.dayType,
       bodyWeightLbs: settings?.bodyWeightLbs ?? null,
       weightInputType,
       barWeightLbs,
