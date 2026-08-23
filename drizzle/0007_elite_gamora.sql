@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `min_reps_for_max` integer DEFAULT 5 NOT NULL;

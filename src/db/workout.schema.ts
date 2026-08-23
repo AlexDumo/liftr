@@ -142,11 +142,14 @@ export const exerciseFavorites = sqliteTable(
   ],
 )
 
+export const DEFAULT_MIN_REPS_FOR_MAX = 5
+
 export const userSettings = sqliteTable('user_settings', {
   userId: text('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
   bodyWeightLbs: real('body_weight_lbs'),
+  minRepsForMax: integer('min_reps_for_max').notNull().default(5),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())

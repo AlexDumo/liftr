@@ -6,7 +6,8 @@ import {
 } from '@tanstack/react-router'
 import { useServerFn } from '@tanstack/react-start'
 import { Plus, Trash } from '@phosphor-icons/react'
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { ExerciseWeightHistoryChart } from '@/components/exercise-weight-history-chart'
 import {
   CardioDurationInput,
   CardioMetricInput,
@@ -24,6 +25,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { getSession } from '#/lib/auth-session'
 import {
@@ -34,6 +36,11 @@ import {
   formatDurationMmSs,
   parseDurationMmSs,
 } from '#/lib/duration-input'
+import {
+  formatRepMaxDelta,
+  maxQualifyingWeightFromDrafts,
+  mergeCurrentSessionPoint,
+} from '#/lib/exercise-weight-history'
 import {
   addSet,
   getWorkoutExercise,
@@ -222,7 +229,7 @@ function ExerciseLoggingPage() {
     toCardioDraft(data.workoutExercise.sets),
   )
   const [currentSetIndex, setCurrentSetIndex] = useState(0)
-  const [mediaExpanded, setMediaExpanded] = useState(false)
+  const [exerciseTab, setExerciseTab] = useState<'details' | 'history'>('details')
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -691,6 +698,51 @@ function ExerciseLoggingPage() {
   }
 
   const exercise = data.workoutExercise.exercise
+  const sessionDate = data.workout.completedAt ?? data.workout.startedAt
+
+  const currentMax = useMemo(() => {
+    if (isCardio) return null
+    return maxQualifyingWeightFromDrafts(
+      strengthSets,
+      data.minRepsForMax,
+      (draft) =>
+        computeDraftPounds(
+          inputType,
+          { primary: draft.primary },
+          data.bodyWeightLbs,
+          resolvedBarWeightLbs,
+        ),
+    )
+  }, [
+    isCardio,
+    strengthSets,
+    data.minRepsForMax,
+    data.bodyWeightLbs,
+    inputType,
+    resolvedBarWeightLbs,
+  ])
+
+  const repMaxDelta = useMemo(() => {
+    if (isCardio) return null
+    return formatRepMaxDelta(
+      currentMax,
+      data.historicalRepMax,
+      data.minRepsForMax,
+    )
+  }, [isCardio, currentMax, data.historicalRepMax, data.minRepsForMax])
+
+  const chartPoints = useMemo(() => {
+    if (isCardio) return []
+    return mergeCurrentSessionPoint(
+      data.weightHistory,
+      data.workout.id,
+      currentMax,
+      sessionDate,
+    )
+  }, [isCardio, data.weightHistory, data.workout.id, currentMax, sessionDate])
+
+  const hasExerciseDetails = Boolean(exercise.imageUrl || exercise.description)
+  const showStrengthTabs = !isCardio
 
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-lg flex-col px-4 py-6">
@@ -720,49 +772,70 @@ function ExerciseLoggingPage() {
         </Button>
       </header>
 
-      {exercise.imageUrl || exercise.description ? (
+      {showStrengthTabs ? (
         <section className="mb-6">
-          {mediaExpanded ? (
-            <>
-              {exercise.imageUrl ? (
-                <img
-                  src={exercise.imageUrl}
-                  alt=""
-                  className="mb-4 aspect-[4/3] w-full object-cover"
-                />
-              ) : null}
-              {exercise.description ? (
-                <p className="mb-3 text-sm leading-relaxed text-[var(--sea-ink-soft)]">
-                  {exercise.description}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <div className="flex gap-3">
-              {exercise.imageUrl ? (
-                <img
-                  src={exercise.imageUrl}
-                  alt=""
-                  className="size-20 shrink-0 object-cover"
-                />
-              ) : null}
-              {exercise.description ? (
-                <p className="min-w-0 flex-1 text-sm leading-relaxed text-[var(--sea-ink-soft)] line-clamp-4">
-                  {exercise.description}
-                </p>
-              ) : null}
-            </div>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="mt-2 px-0 text-[var(--sea-ink-soft)] hover:bg-transparent hover:text-[var(--sea-ink)]"
-            aria-expanded={mediaExpanded}
-            onClick={() => setMediaExpanded((open) => !open)}
+          <Tabs
+            value={exerciseTab}
+            onValueChange={(value) => {
+              if (value === 'details' || value === 'history') {
+                setExerciseTab(value)
+              }
+            }}
           >
-            {mediaExpanded ? 'Collapse' : 'Expand'}
-          </Button>
+            <TabsList variant="line" className="mb-4 w-full">
+              <TabsTrigger value="details" className="flex-1">
+                Details
+              </TabsTrigger>
+              <TabsTrigger value="history" className="flex-1">
+                History
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="details" className="text-sm">
+              {hasExerciseDetails ? (
+                <>
+                  {exercise.imageUrl ? (
+                    <img
+                      src={exercise.imageUrl}
+                      alt=""
+                      className="mb-4 aspect-[4/3] w-full object-cover"
+                    />
+                  ) : null}
+                  {exercise.description ? (
+                    <p className="leading-relaxed text-[var(--sea-ink-soft)]">
+                      {exercise.description}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-[var(--sea-ink-soft)]">
+                  No details available for this exercise.
+                </p>
+              )}
+            </TabsContent>
+            <TabsContent value="history">
+              {exerciseTab === 'history' ? (
+                <ExerciseWeightHistoryChart
+                  points={chartPoints}
+                  minReps={data.minRepsForMax}
+                />
+              ) : null}
+            </TabsContent>
+          </Tabs>
+        </section>
+      ) : hasExerciseDetails ? (
+        <section className="mb-6">
+          {exercise.imageUrl ? (
+            <img
+              src={exercise.imageUrl}
+              alt=""
+              className="mb-4 aspect-[4/3] w-full object-cover"
+            />
+          ) : null}
+          {exercise.description ? (
+            <p className="text-sm leading-relaxed text-[var(--sea-ink-soft)]">
+              {exercise.description}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -996,7 +1069,23 @@ function ExerciseLoggingPage() {
         </>
       )}
 
-      <div className="mt-6 grid grid-cols-2 gap-3">
+      {!isCardio && repMaxDelta ? (
+        <p
+          className={cn(
+            'mt-6 text-center text-sm',
+            repMaxDelta.kind === 'above' && 'font-medium text-[var(--palm)]',
+            repMaxDelta.kind === 'below' && 'text-[var(--sea-ink-soft)]',
+            repMaxDelta.kind === 'matching' && 'font-medium text-[var(--lagoon-deep)]',
+            (repMaxDelta.kind === 'no_current' ||
+              repMaxDelta.kind === 'no_history') &&
+              'text-[var(--sea-ink-soft)]',
+          )}
+        >
+          {repMaxDelta.message}
+        </p>
+      ) : null}
+
+      <div className={cn('grid grid-cols-2 gap-3', !isCardio && repMaxDelta ? 'mt-3' : 'mt-6')}>
         <Button
           type="button"
           variant="outline"

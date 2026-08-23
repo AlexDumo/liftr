@@ -9,6 +9,7 @@ import { getSession } from '#/lib/auth-session'
 import {
   getUserSettings,
   updateBodyWeight,
+  updateMinRepsForMax,
   updateUserName,
 } from '#/lib/settings.functions'
 import { Button } from '@/components/ui/button'
@@ -31,17 +32,22 @@ function SettingsPage() {
   const navigate = useNavigate()
   const updateUserNameFn = useServerFn(updateUserName)
   const updateBodyWeightFn = useServerFn(updateBodyWeight)
+  const updateMinRepsForMaxFn = useServerFn(updateMinRepsForMax)
 
   const [name, setName] = useState(data.name)
   const [persistedName, setPersistedName] = useState(data.name)
   const [bodyWeight, setBodyWeight] = useState(
     data.bodyWeightLbs === null ? '' : String(data.bodyWeightLbs),
   )
+  const [minRepsForMax, setMinRepsForMax] = useState(String(data.minRepsForMax))
+  const [persistedMinRepsForMax, setPersistedMinRepsForMax] = useState(
+    data.minRepsForMax,
+  )
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [savedField, setSavedField] = useState<'name' | 'bodyWeight' | null>(
-    null,
-  )
+  const [savedField, setSavedField] = useState<
+    'name' | 'bodyWeight' | 'minRepsForMax' | null
+  >(null)
 
   useEffect(() => {
     setName(data.name)
@@ -49,7 +55,9 @@ function SettingsPage() {
     setBodyWeight(
       data.bodyWeightLbs === null ? '' : String(data.bodyWeightLbs),
     )
-  }, [data.name, data.bodyWeightLbs])
+    setMinRepsForMax(String(data.minRepsForMax))
+    setPersistedMinRepsForMax(data.minRepsForMax)
+  }, [data.name, data.bodyWeightLbs, data.minRepsForMax])
 
   const persistName = (raw: string) => {
     const trimmed = raw.trim()
@@ -95,6 +103,38 @@ function SettingsPage() {
     })
   }
 
+  const persistMinRepsForMax = (raw: string) => {
+    const trimmed = raw.trim()
+    const value = Number(trimmed)
+    if (
+      !trimmed ||
+      !Number.isInteger(value) ||
+      value < 1 ||
+      value > 50
+    ) {
+      setError('Enter a whole number between 1 and 50')
+      return
+    }
+    if (value === persistedMinRepsForMax) {
+      return
+    }
+
+    startTransition(async () => {
+      setError(null)
+      setSavedField(null)
+      try {
+        const result = await updateMinRepsForMaxFn({
+          data: { minRepsForMax: value },
+        })
+        setMinRepsForMax(String(result.minRepsForMax))
+        setPersistedMinRepsForMax(result.minRepsForMax)
+        setSavedField('minRepsForMax')
+      } catch {
+        setError('Could not save min reps for max')
+      }
+    })
+  }
+
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-lg flex-col px-4 py-8">
       <header className="mb-8 flex items-start justify-between gap-4">
@@ -106,7 +146,7 @@ function SettingsPage() {
             Profile
           </h1>
           <p className="mt-1 text-sm text-[var(--sea-ink-soft)]">
-            Your name and body weight for workouts.
+            Your name, body weight, and rep-max preferences for workouts.
           </p>
         </div>
         <Button
@@ -157,6 +197,30 @@ function SettingsPage() {
             onBlur={(event) => persistBodyWeight(event.target.value)}
           />
           {savedField === 'bodyWeight' && !error ? (
+            <p className="text-sm text-[var(--sea-ink-soft)]">Saved</p>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="min-reps-for-max">Min reps for max</Label>
+          <Input
+            id="min-reps-for-max"
+            inputMode="numeric"
+            value={minRepsForMax}
+            disabled={isPending}
+            placeholder="5"
+            className="h-11 text-base"
+            onChange={(event) => {
+              setMinRepsForMax(event.target.value)
+              setSavedField(null)
+            }}
+            onBlur={(event) => persistMinRepsForMax(event.target.value)}
+          />
+          <p className="text-sm text-[var(--sea-ink-soft)]">
+            Sets with at least this many reps count toward your rep max and
+            weight history.
+          </p>
+          {savedField === 'minRepsForMax' && !error ? (
             <p className="text-sm text-[var(--sea-ink-soft)]">Saved</p>
           ) : null}
         </div>

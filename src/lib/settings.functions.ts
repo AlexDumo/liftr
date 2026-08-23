@@ -3,7 +3,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { eq } from 'drizzle-orm'
 import { getDb } from '#/db'
 import { users } from '#/db/auth.schema'
-import { userSettings } from '#/db/workout.schema'
+import { userSettings, DEFAULT_MIN_REPS_FOR_MAX } from '#/db/workout.schema'
 import { getSession } from '#/lib/auth-session'
 
 function firstRow<T>(rows: T[]): T | undefined {
@@ -33,6 +33,7 @@ export const getUserSettings = createServerFn({ method: 'GET' }).handler(
     return {
       name: user.name,
       bodyWeightLbs: settings?.bodyWeightLbs ?? null,
+      minRepsForMax: settings?.minRepsForMax ?? DEFAULT_MIN_REPS_FOR_MAX,
     }
   },
 )
@@ -107,4 +108,50 @@ export const updateBodyWeight = createServerFn({ method: 'POST' })
     const inserted = firstRow(insertedRows)
     if (!inserted) throw new Error('Failed to create settings')
     return { bodyWeightLbs: inserted.bodyWeightLbs }
+  })
+
+export const updateMinRepsForMax = createServerFn({ method: 'POST' })
+  .validator((data: { minRepsForMax: number }) => {
+    if (
+      typeof data.minRepsForMax !== 'number' ||
+      !Number.isInteger(data.minRepsForMax) ||
+      data.minRepsForMax < 1 ||
+      data.minRepsForMax > 50
+    ) {
+      throw new Error('Min reps must be an integer between 1 and 50')
+    }
+    return data
+  })
+  .handler(async ({ data }) => {
+    const user = await requireUser()
+    const db = getDb()
+
+    const existingRows = await db
+      .select({ userId: userSettings.userId })
+      .from(userSettings)
+      .where(eq(userSettings.userId, user.id))
+      .limit(1)
+
+    if (firstRow(existingRows)) {
+      const updatedRows = await db
+        .update(userSettings)
+        .set({ minRepsForMax: data.minRepsForMax })
+        .where(eq(userSettings.userId, user.id))
+        .returning()
+      const updated = firstRow(updatedRows)
+      if (!updated) throw new Error('Failed to update settings')
+      return { minRepsForMax: updated.minRepsForMax }
+    }
+
+    const insertedRows = await db
+      .insert(userSettings)
+      .values({
+        userId: user.id,
+        minRepsForMax: data.minRepsForMax,
+      })
+      .returning()
+
+    const inserted = firstRow(insertedRows)
+    if (!inserted) throw new Error('Failed to create settings')
+    return { minRepsForMax: inserted.minRepsForMax }
   })

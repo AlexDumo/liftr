@@ -1,6 +1,6 @@
 import { redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { and, asc, count, desc, eq, like, or, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, isNotNull, like, max, ne, or, isNull, sql } from 'drizzle-orm'
 import { getDb } from '#/db'
 import {
   dayTypes,
@@ -12,6 +12,7 @@ import {
   workoutExercises,
   workouts,
   workoutSets,
+  DEFAULT_MIN_REPS_FOR_MAX,
 } from '#/db/workout.schema'
 import type { DayType, WeightInputType } from '#/db/workout.schema'
 import {
@@ -27,6 +28,7 @@ import {
 import {
   DEFAULT_BAR_WEIGHT_LBS,
   defaultWeightInputType,
+  isCardioInputType,
   isWeightInputType,
 } from '#/lib/weight-input'
 import { validateCustomExerciseName } from '#/lib/custom-exercise'
@@ -822,11 +824,66 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
         ? 'cardio'
         : defaultWeightInputType(row.exercise.equipment))
     const barWeightLbs = pref?.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS
+    const minRepsForMax = settings?.minRepsForMax ?? DEFAULT_MIN_REPS_FOR_MAX
+
+    let weightHistory: Array<{
+      workoutId: string
+      date: Date
+      maxWeight: number
+    }> = []
+    let historicalRepMax: number | null = null
+
+    if (!isCardioInputType(weightInputType)) {
+      const sessionDate = sql<number>`coalesce(${workouts.completedAt}, ${workouts.startedAt})`
+
+      const historyRows = await db
+        .select({
+          workoutId: workouts.id,
+          sessionDate,
+          maxWeight: max(workoutSets.weight),
+        })
+        .from(workoutSets)
+        .innerJoin(
+          workoutExercises,
+          eq(workoutSets.workoutExerciseId, workoutExercises.id),
+        )
+        .innerJoin(workouts, eq(workoutExercises.workoutId, workouts.id))
+        .where(
+          and(
+            eq(workouts.userId, user.id),
+            eq(workoutExercises.exerciseId, row.exercise.id),
+            isNotNull(workoutSets.weight),
+            isNotNull(workoutSets.reps),
+            gte(workoutSets.reps, minRepsForMax),
+            ne(workouts.id, workout.id),
+          ),
+        )
+        .groupBy(workouts.id)
+        .orderBy(asc(sessionDate))
+
+      weightHistory = historyRows
+        .filter(
+          (entry): entry is typeof entry & { maxWeight: number } =>
+            entry.maxWeight !== null,
+        )
+        .map((entry) => ({
+          workoutId: entry.workoutId,
+          date: new Date(entry.sessionDate),
+          maxWeight: entry.maxWeight,
+        }))
+
+      if (weightHistory.length > 0) {
+        historicalRepMax = Math.max(...weightHistory.map((point) => point.maxWeight))
+      }
+    }
 
     return {
       workout,
       dayType: workout.dayType,
       bodyWeightLbs: settings?.bodyWeightLbs ?? null,
+      minRepsForMax,
+      weightHistory,
+      historicalRepMax,
       weightInputType,
       barWeightLbs,
       cardioUnitLabel: cardioPref?.unitLabel ?? '',

@@ -50,6 +50,13 @@
       "when": 1787500738567,
       "tag": "0006_fixed_trauma",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787501148158,
+      "tag": "0007_elite_gamora",
+      "breakpoints": true
     }
   ]
 }
