@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm'
 import type { getDb } from '#/db'
 import {
+  dayFavorites,
   userSettings,
   workoutDays,
   workoutProfiles,
@@ -17,34 +18,67 @@ function firstRow<T>(rows: T[]): T | undefined {
   return rows.length > 0 ? rows[0] : undefined
 }
 
+// D1 caps a query at 100 bound parameters; a favorite row binds 3 (plus
+// the defaulted created_at), so stay well under that.
+const FAVORITE_INSERT_CHUNK = 25
+
+/**
+ * Creates a profile, its days, and optionally per-day favorites in one D1
+ * batch, so a failure never leaves a half-built profile. Pass `id` for a
+ * deterministic profile (day ids derive from it); repeats are then no-ops.
+ */
 export async function insertProfileWithDays(
   db: Db,
   userId: string,
   name: string,
   days: ProfileDayTemplate[],
+  options: {
+    id?: string
+    favorites?: Array<{ exerciseId: string; dayIndex: number }>
+  } = {},
 ) {
-  const profileId = crypto.randomUUID()
-  const createdRows = await db
-    .insert(workoutProfiles)
-    .values({ id: profileId, userId, name })
-    .returning()
-
-  const profile = firstRow(createdRows)
-  if (!profile) throw new Error('Failed to create profile')
-
+  const profileId = options.id ?? crypto.randomUUID()
   const dayRows = days.map((day, sortOrder) => ({
-    id: crypto.randomUUID(),
+    id: options.id ? `${options.id}-${sortOrder}` : crypto.randomUUID(),
     profileId,
     name: day.name,
     description: day.description,
     isCardio: day.isCardio,
     sortOrder,
   }))
-  if (dayRows.length > 0) {
-    await db.insert(workoutDays).values(dayRows)
-  }
 
-  return { profile, dayIds: dayRows.map((row) => row.id) }
+  const favoriteRows = (options.favorites ?? []).flatMap((favorite) => {
+    const day = dayRows.at(favorite.dayIndex)
+    return day
+      ? [{ userId, exerciseId: favorite.exerciseId, dayId: day.id }]
+      : []
+  })
+  const favoriteInserts = Array.from(
+    { length: Math.ceil(favoriteRows.length / FAVORITE_INSERT_CHUNK) },
+    (_, chunk) =>
+      db
+        .insert(dayFavorites)
+        .values(
+          favoriteRows.slice(
+            chunk * FAVORITE_INSERT_CHUNK,
+            (chunk + 1) * FAVORITE_INSERT_CHUNK,
+          ),
+        )
+        .onConflictDoNothing(),
+  )
+
+  await db.batch([
+    db
+      .insert(workoutProfiles)
+      .values({ id: profileId, userId, name })
+      .onConflictDoNothing(),
+    ...(dayRows.length > 0
+      ? [db.insert(workoutDays).values(dayRows).onConflictDoNothing()]
+      : []),
+    ...favoriteInserts,
+  ])
+
+  return { profile: await requireOwnedProfile(db, userId, profileId) }
 }
 
 export async function setActiveProfileId(
@@ -99,6 +133,8 @@ export async function ensureActiveProfile(db: Db, userId: string) {
         userId,
         DEFAULT_PROFILE_NAME,
         DEFAULT_PROFILE_DAYS,
+        // Deterministic, so concurrent first loads can't create two defaults.
+        { id: `default-${userId}` },
       )
     ).profile
 

@@ -179,42 +179,44 @@ export const duplicateProfile = createServerFn({ method: 'POST' })
     const source = await requireOwnedProfile(db, user.id, data.profileId)
     const sourceDays = await listProfileDays(db, source.id)
 
-    const { profile, dayIds } = await insertProfileWithDays(
+    const favorites =
+      sourceDays.length > 0
+        ? await db
+            .select({
+              exerciseId: dayFavorites.exerciseId,
+              dayId: dayFavorites.dayId,
+            })
+            .from(dayFavorites)
+            .where(
+              and(
+                eq(dayFavorites.userId, user.id),
+                inArray(
+                  dayFavorites.dayId,
+                  sourceDays.map((day) => day.id),
+                ),
+              ),
+            )
+        : []
+
+    const dayIndexBySourceId = new Map(
+      sourceDays.map((day, index) => [day.id, index]),
+    )
+    const { profile } = await insertProfileWithDays(
       db,
       user.id,
       validateProfileName(
         `${source.name} (copy)`.slice(0, PROFILE_NAME_MAX_LENGTH),
       ),
       sourceDays,
+      {
+        favorites: favorites.flatMap((favorite) => {
+          const dayIndex = dayIndexBySourceId.get(favorite.dayId)
+          return dayIndex === undefined
+            ? []
+            : [{ exerciseId: favorite.exerciseId, dayIndex }]
+        }),
+      },
     )
-
-    if (sourceDays.length > 0) {
-      const favorites = await db
-        .select()
-        .from(dayFavorites)
-        .where(
-          and(
-            eq(dayFavorites.userId, user.id),
-            inArray(
-              dayFavorites.dayId,
-              sourceDays.map((day) => day.id),
-            ),
-          ),
-        )
-
-      const newDayIdBySourceId = new Map(
-        sourceDays.map((day, index) => [day.id, dayIds[index]]),
-      )
-      const copies = favorites.flatMap((favorite) => {
-        const dayId = newDayIdBySourceId.get(favorite.dayId)
-        return dayId
-          ? [{ userId: user.id, exerciseId: favorite.exerciseId, dayId }]
-          : []
-      })
-      if (copies.length > 0) {
-        await db.insert(dayFavorites).values(copies)
-      }
-    }
 
     return { profileId: profile.id }
   })
@@ -367,11 +369,11 @@ export const updateDay = createServerFn({ method: 'POST' })
     const updated = firstRow(updatedRows)
     if (!updated) throw new Error('Failed to update day')
 
-    // Keep an in-progress session's label in step with the day it belongs to.
-    if (data.name !== undefined) {
+    // Keep an in-progress session in step with the day it belongs to.
+    if (data.name !== undefined || data.isCardio !== undefined) {
       await db
         .update(workouts)
-        .set({ dayName: updated.name })
+        .set({ dayName: updated.name, isCardio: updated.isCardio })
         .where(
           and(
             eq(workouts.dayId, updated.id),

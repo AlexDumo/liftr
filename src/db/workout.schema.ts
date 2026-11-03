@@ -95,6 +95,9 @@ export const workouts = sqliteTable(
     }),
     // Snapshot so history keeps its label if the day is renamed or deleted.
     dayName: text('day_name').notNull().default(''),
+    isCardio: integer('is_cardio', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     status: text('status')
       .$type<WorkoutStatus>()
       .notNull()
