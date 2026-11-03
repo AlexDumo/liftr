@@ -142,7 +142,7 @@ function ProfileEditorPage() {
   const onDeleteDay = (day: DayDraft) => {
     if (
       !window.confirm(
-        `Remove ${day.name}? Past sessions keep their history, but its favorites are removed.`,
+        `Remove ${day.name}? Past sessions keep their name and sets, but this day's favorites are removed.`,
       )
     ) {
       return
@@ -156,7 +156,7 @@ function ProfileEditorPage() {
   const onDeleteProfile = () => {
     if (
       !window.confirm(
-        `Delete ${data.profile.name}? Past sessions keep their history, but this profile's days and favorites are removed.`,
+        `Delete ${data.profile.name}? Past sessions keep their names and sets, but this profile's days and favorites are removed.`,
       )
     ) {
       return

@@ -8,7 +8,6 @@ import {
   userExerciseCardioPrefs,
   userExerciseWeightPrefs,
   userSettings,
-  workoutDays,
   workoutExercises,
   workouts,
   workoutSets,
@@ -93,19 +92,6 @@ async function maybeAutoCompleteStaleWorkout(
   return firstRow(updatedRows) ?? workout
 }
 
-async function workoutIsCardio(
-  db: ReturnType<typeof getDb>,
-  workout: typeof workouts.$inferSelect,
-): Promise<boolean> {
-  if (!workout.dayId) return false
-  const rows = await db
-    .select({ isCardio: workoutDays.isCardio })
-    .from(workoutDays)
-    .where(eq(workoutDays.id, workout.dayId))
-    .limit(1)
-  return firstRow(rows)?.isCardio ?? false
-}
-
 /** Optional day id from the client; `null` means the session's day was deleted. */
 function validateOptionalDayId(dayId: unknown): string | null {
   if (dayId === null) return null
@@ -144,7 +130,7 @@ async function insertExerciseIntoWorkout(
   const pref = firstRow(prefRows)
   const inputType =
     pref?.inputType ??
-    ((await workoutIsCardio(db, workout))
+    (workout.isCardio
       ? 'cardio'
       : defaultWeightInputType(exercise.equipment))
   const initialSetCount = inputType === 'cardio' ? 1 : 3
@@ -266,6 +252,7 @@ export const startWorkout = createServerFn({ method: 'POST' })
         userId: user.id,
         dayId: day.id,
         dayName: day.name,
+        isCardio: day.isCardio,
         status: 'in_progress',
       })
       .returning()
@@ -513,6 +500,30 @@ export const createCustomExercise = createServerFn({ method: 'POST' })
     const user = await requireUser()
     const db = getDb()
 
+    // Validate everything the request points at before creating anything.
+    const day = data.dayId
+      ? await requireOwnedDay(db, user.id, data.dayId)
+      : null
+
+    let workout: typeof workouts.$inferSelect | undefined
+    if (data.addToWorkoutId) {
+      const workoutRows = await db
+        .select()
+        .from(workouts)
+        .where(
+          and(
+            eq(workouts.id, data.addToWorkoutId),
+            eq(workouts.userId, user.id),
+          ),
+        )
+        .limit(1)
+
+      workout = firstRow(workoutRows)
+      if (!workout) {
+        throw new Error('Workout not found')
+      }
+    }
+
     const exerciseId = createId()
     const createdRows = await db
       .insert(exercises)
@@ -537,35 +548,16 @@ export const createCustomExercise = createServerFn({ method: 'POST' })
       throw new Error('Failed to create custom exercise')
     }
 
-    let favorited = false
-    if (data.dayId) {
-      const day = await requireOwnedDay(db, user.id, data.dayId)
+    if (day) {
       await db.insert(dayFavorites).values({
         userId: user.id,
         exerciseId: exercise.id,
         dayId: day.id,
       })
-      favorited = true
     }
 
     let workoutExerciseId: string | undefined
-    if (data.addToWorkoutId) {
-      const workoutRows = await db
-        .select()
-        .from(workouts)
-        .where(
-          and(
-            eq(workouts.id, data.addToWorkoutId),
-            eq(workouts.userId, user.id),
-          ),
-        )
-        .limit(1)
-
-      const workout = firstRow(workoutRows)
-      if (!workout) {
-        throw new Error('Workout not found')
-      }
-
+    if (workout) {
       const result = await insertExerciseIntoWorkout(
         db,
         user,
@@ -576,7 +568,7 @@ export const createCustomExercise = createServerFn({ method: 'POST' })
     }
 
     return {
-      exercise: mapExerciseRow(exercise, favorited),
+      exercise: mapExerciseRow(exercise, Boolean(day)),
       workoutExerciseId,
     }
   })
@@ -627,6 +619,20 @@ export const toggleFavorite = createServerFn({ method: 'POST' })
     const db = getDb()
 
     await requireOwnedDay(db, user.id, data.dayId)
+
+    const visibleRows = await db
+      .select({ id: exercises.id })
+      .from(exercises)
+      .where(
+        and(
+          eq(exercises.id, data.exerciseId),
+          exerciseVisibleToUser(user.id),
+        ),
+      )
+      .limit(1)
+    if (!firstRow(visibleRows)) {
+      throw new Error('Exercise not found')
+    }
 
     const existingRows = await db
       .select()
@@ -811,7 +817,7 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
     const settings = firstRow(settingsRows)
     const weightInputType =
       pref?.inputType ??
-      ((await workoutIsCardio(db, workout))
+      (workout.isCardio
         ? 'cardio'
         : defaultWeightInputType(row.exercise.equipment))
     const barWeightLbs = pref?.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS

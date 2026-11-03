@@ -71,6 +71,13 @@
       "when": 1793711709422,
       "tag": "0009_drop_fixed_day_types",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793712506630,
+      "tag": "0010_workout_is_cardio",
+      "breakpoints": true
     }
   ]
 }
