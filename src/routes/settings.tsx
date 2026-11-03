@@ -143,7 +143,7 @@ function SettingsPage() {
             Settings
           </p>
           <h1 className="mt-2 font-heading text-3xl font-medium tracking-tight text-[var(--sea-ink)]">
-            Profile
+            Account
           </h1>
           <p className="mt-1 text-sm text-[var(--sea-ink-soft)]">
             Your name, body weight, and rep-max preferences for workouts.

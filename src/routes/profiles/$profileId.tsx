@@ -175,7 +175,7 @@ function ProfileEditorPage() {
           <p className="text-xs font-semibold tracking-[0.18em] text-[var(--kicker)] uppercase">
             {data.isActive ? 'Active profile' : 'Profile'}
           </p>
-          <h1 className="mt-2 truncate font-heading text-3xl font-medium tracking-tight text-[var(--sea-ink)]">
+          <h1 className="mt-2 break-words font-heading text-3xl font-medium tracking-tight text-[var(--sea-ink)]">
             {data.profile.name}
           </h1>
         </div>
