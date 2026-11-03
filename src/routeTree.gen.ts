@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ProfilesIndexRouteImport } from './routes/profiles/index'
+import { Route as ProfilesProfileIdRouteImport } from './routes/profiles/$profileId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as WorkoutWorkoutIdIndexRouteImport } from './routes/workout/$workoutId/index'
 import { Route as WorkoutWorkoutIdExerciseWorkoutExerciseIdRouteImport } from './routes/workout/$workoutId/exercise/$workoutExerciseId'
@@ -37,6 +39,16 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfilesIndexRoute = ProfilesIndexRouteImport.update({
+  id: '/profiles/',
+  path: '/profiles/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfilesProfileIdRoute = ProfilesProfileIdRouteImport.update({
+  id: '/profiles/$profileId',
+  path: '/profiles/$profileId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -59,6 +71,8 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/profiles/$profileId': typeof ProfilesProfileIdRoute
+  '/profiles/': typeof ProfilesIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/workout/$workoutId/': typeof WorkoutWorkoutIdIndexRoute
   '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -68,6 +82,8 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/profiles/$profileId': typeof ProfilesProfileIdRoute
+  '/profiles': typeof ProfilesIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/workout/$workoutId': typeof WorkoutWorkoutIdIndexRoute
   '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -78,6 +94,8 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/profiles/$profileId': typeof ProfilesProfileIdRoute
+  '/profiles/': typeof ProfilesIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/workout/$workoutId/': typeof WorkoutWorkoutIdIndexRoute
   '/workout/$workoutId/exercise/$workoutExerciseId': typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -89,6 +107,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/sessions'
     | '/settings'
+    | '/profiles/$profileId'
+    | '/profiles/'
     | '/api/auth/$'
     | '/workout/$workoutId/'
     | '/workout/$workoutId/exercise/$workoutExerciseId'
@@ -98,6 +118,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/sessions'
     | '/settings'
+    | '/profiles/$profileId'
+    | '/profiles'
     | '/api/auth/$'
     | '/workout/$workoutId'
     | '/workout/$workoutId/exercise/$workoutExerciseId'
@@ -107,6 +129,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/sessions'
     | '/settings'
+    | '/profiles/$profileId'
+    | '/profiles/'
     | '/api/auth/$'
     | '/workout/$workoutId/'
     | '/workout/$workoutId/exercise/$workoutExerciseId'
@@ -117,6 +141,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
+  ProfilesProfileIdRoute: typeof ProfilesProfileIdRoute
+  ProfilesIndexRoute: typeof ProfilesIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   WorkoutWorkoutIdIndexRoute: typeof WorkoutWorkoutIdIndexRoute
   WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute: typeof WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute
@@ -152,6 +178,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profiles/': {
+      id: '/profiles/'
+      path: '/profiles'
+      fullPath: '/profiles/'
+      preLoaderRoute: typeof ProfilesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profiles/$profileId': {
+      id: '/profiles/$profileId'
+      path: '/profiles/$profileId'
+      fullPath: '/profiles/$profileId'
+      preLoaderRoute: typeof ProfilesProfileIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -181,6 +221,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
+  ProfilesProfileIdRoute: ProfilesProfileIdRoute,
+  ProfilesIndexRoute: ProfilesIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   WorkoutWorkoutIdIndexRoute: WorkoutWorkoutIdIndexRoute,
   WorkoutWorkoutIdExerciseWorkoutExerciseIdRoute:

@@ -3,24 +3,25 @@ import { createServerFn } from '@tanstack/react-start'
 import { and, asc, count, desc, eq, gte, isNotNull, like, max, ne, or, isNull, sql } from 'drizzle-orm'
 import { getDb } from '#/db'
 import {
-  dayTypes,
-  exerciseFavorites,
+  dayFavorites,
   exercises,
   userExerciseCardioPrefs,
   userExerciseWeightPrefs,
   userSettings,
+  workoutDays,
   workoutExercises,
   workouts,
   workoutSets,
   DEFAULT_MIN_REPS_FOR_MAX,
 } from '#/db/workout.schema'
-import type { DayType, WeightInputType } from '#/db/workout.schema'
+import type { WeightInputType } from '#/db/workout.schema'
 import {
   DEFAULT_CARDIO_RATE_MODE,
   isCardioRateMode,
   type CardioRateMode,
 } from '#/lib/cardio-rate'
 import { getSession } from '#/lib/auth-session'
+import { requireOwnedDay } from '#/lib/profile.server'
 import {
   completionTimestampForStaleWorkout,
   isStaleWorkout,
@@ -55,10 +56,6 @@ function parseJsonArray(value: string): string[] {
   } catch {
     return []
   }
-}
-
-function isDayType(value: unknown): value is DayType {
-  return typeof value === 'string' && (dayTypes as readonly string[]).includes(value)
 }
 
 function createId() {
@@ -96,6 +93,26 @@ async function maybeAutoCompleteStaleWorkout(
   return firstRow(updatedRows) ?? workout
 }
 
+async function workoutIsCardio(
+  db: ReturnType<typeof getDb>,
+  workout: typeof workouts.$inferSelect,
+): Promise<boolean> {
+  if (!workout.dayId) return false
+  const rows = await db
+    .select({ isCardio: workoutDays.isCardio })
+    .from(workoutDays)
+    .where(eq(workoutDays.id, workout.dayId))
+    .limit(1)
+  return firstRow(rows)?.isCardio ?? false
+}
+
+/** Optional day id from the client; `null` means the session's day was deleted. */
+function validateOptionalDayId(dayId: unknown): string | null {
+  if (dayId === null) return null
+  if (typeof dayId !== 'string' || !dayId) throw new Error('Invalid day')
+  return dayId
+}
+
 function exerciseVisibleToUser(userId: string) {
   return or(isNull(exercises.userId), eq(exercises.userId, userId))
 }
@@ -127,7 +144,7 @@ async function insertExerciseIntoWorkout(
   const pref = firstRow(prefRows)
   const inputType =
     pref?.inputType ??
-    (workout.dayType === 'cardio'
+    ((await workoutIsCardio(db, workout))
       ? 'cardio'
       : defaultWeightInputType(exercise.equipment))
   const initialSetCount = inputType === 'cardio' ? 1 : 3
@@ -194,46 +211,16 @@ export const getActiveWorkout = createServerFn({ method: 'GET' }).handler(
   },
 )
 
-/** Latest completed workout date (ISO) per day type for the current user. */
-export const getLastCompletedByDayType = createServerFn({ method: 'GET' }).handler(
-  async () => {
-    const user = await requireUser()
-    const db = getDb()
-
-    const rows = await db
-      .select({
-        dayType: workouts.dayType,
-        completedAt: workouts.completedAt,
-        startedAt: workouts.startedAt,
-      })
-      .from(workouts)
-      .where(
-        and(eq(workouts.userId, user.id), eq(workouts.status, 'completed')),
-      )
-      .orderBy(desc(workouts.completedAt), desc(workouts.startedAt))
-
-    const lastByDayType: Partial<Record<DayType, string>> = {}
-    for (const row of rows) {
-      if (lastByDayType[row.dayType]) continue
-      const when = row.completedAt ?? row.startedAt
-      lastByDayType[row.dayType] = when.toISOString()
-      if (Object.keys(lastByDayType).length === dayTypes.length) break
-    }
-
-    return lastByDayType
-  },
-)
-
 export const startWorkout = createServerFn({ method: 'POST' })
-  .validator((data: { dayType: DayType }) => {
-    if (!isDayType(data.dayType)) {
-      throw new Error('Invalid day type')
-    }
+  .validator((data: { dayId: string }) => {
+    if (!data.dayId) throw new Error('dayId is required')
     return data
   })
   .handler(async ({ data }) => {
     const user = await requireUser()
     const db = getDb()
+
+    const day = await requireOwnedDay(db, user.id, data.dayId)
 
     const existingRows = await db
       .select()
@@ -242,7 +229,7 @@ export const startWorkout = createServerFn({ method: 'POST' })
         and(
           eq(workouts.userId, user.id),
           eq(workouts.status, 'in_progress'),
-          eq(workouts.dayType, data.dayType),
+          eq(workouts.dayId, day.id),
         ),
       )
       .limit(1)
@@ -277,7 +264,8 @@ export const startWorkout = createServerFn({ method: 'POST' })
       .values({
         id,
         userId: user.id,
-        dayType: data.dayType,
+        dayId: day.id,
+        dayName: day.name,
         status: 'in_progress',
       })
       .returning()
@@ -409,7 +397,7 @@ export const listWorkouts = createServerFn({ method: 'GET' }).handler(
     const rows = await db
       .select({
         id: workouts.id,
-        dayType: workouts.dayType,
+        dayName: workouts.dayName,
         status: workouts.status,
         startedAt: workouts.startedAt,
         completedAt: workouts.completedAt,
@@ -420,7 +408,7 @@ export const listWorkouts = createServerFn({ method: 'GET' }).handler(
       .where(eq(workouts.userId, user.id))
       .groupBy(
         workouts.id,
-        workouts.dayType,
+        workouts.dayName,
         workouts.status,
         workouts.startedAt,
         workouts.completedAt,
@@ -453,22 +441,22 @@ export const deleteWorkout = createServerFn({ method: 'POST' })
   })
 
 export const listFavorites = createServerFn({ method: 'GET' })
-  .validator((data: { dayType: DayType }) => {
-    if (!isDayType(data.dayType)) throw new Error('Invalid day type')
-    return data
-  })
+  .validator((data: { dayId: string | null }) => ({
+    dayId: validateOptionalDayId(data.dayId),
+  }))
   .handler(async ({ data }) => {
     const user = await requireUser()
+    if (!data.dayId) return []
     const db = getDb()
 
     const rows = await db
       .select({ exercise: exercises })
-      .from(exerciseFavorites)
-      .innerJoin(exercises, eq(exerciseFavorites.exerciseId, exercises.id))
+      .from(dayFavorites)
+      .innerJoin(exercises, eq(dayFavorites.exerciseId, exercises.id))
       .where(
         and(
-          eq(exerciseFavorites.userId, user.id),
-          eq(exerciseFavorites.dayType, data.dayType),
+          eq(dayFavorites.userId, user.id),
+          eq(dayFavorites.dayId, data.dayId),
         ),
       )
       .orderBy(asc(exercises.name))
@@ -477,10 +465,9 @@ export const listFavorites = createServerFn({ method: 'GET' })
   })
 
 export const listCustomExercises = createServerFn({ method: 'GET' })
-  .validator((data: { dayType: DayType }) => {
-    if (!isDayType(data.dayType)) throw new Error('Invalid day type')
-    return data
-  })
+  .validator((data: { dayId: string | null }) => ({
+    dayId: validateOptionalDayId(data.dayId),
+  }))
   .handler(async ({ data }) => {
     const user = await requireUser()
     const db = getDb()
@@ -488,15 +475,15 @@ export const listCustomExercises = createServerFn({ method: 'GET' })
     const rows = await db
       .select({
         exercise: exercises,
-        favoriteUserId: exerciseFavorites.userId,
+        favoriteUserId: dayFavorites.userId,
       })
       .from(exercises)
       .leftJoin(
-        exerciseFavorites,
+        dayFavorites,
         and(
-          eq(exerciseFavorites.exerciseId, exercises.id),
-          eq(exerciseFavorites.userId, user.id),
-          eq(exerciseFavorites.dayType, data.dayType),
+          eq(dayFavorites.exerciseId, exercises.id),
+          eq(dayFavorites.userId, user.id),
+          eq(dayFavorites.dayId, data.dayId ?? ''),
         ),
       )
       .where(eq(exercises.userId, user.id))
@@ -509,15 +496,15 @@ export const listCustomExercises = createServerFn({ method: 'GET' })
 
 export const createCustomExercise = createServerFn({ method: 'POST' })
   .validator(
-    (data: { name: string; dayType: DayType; addToWorkoutId?: string }) => {
-      if (!isDayType(data.dayType)) throw new Error('Invalid day type')
+    (data: { name: string; dayId: string | null; addToWorkoutId?: string }) => {
+      const dayId = validateOptionalDayId(data.dayId)
       const name = validateCustomExerciseName(data.name)
       if (data.addToWorkoutId !== undefined && !data.addToWorkoutId) {
         throw new Error('addToWorkoutId is required when provided')
       }
       return {
         name,
-        dayType: data.dayType,
+        dayId,
         addToWorkoutId: data.addToWorkoutId,
       }
     },
@@ -550,11 +537,16 @@ export const createCustomExercise = createServerFn({ method: 'POST' })
       throw new Error('Failed to create custom exercise')
     }
 
-    await db.insert(exerciseFavorites).values({
-      userId: user.id,
-      exerciseId: exercise.id,
-      dayType: data.dayType,
-    })
+    let favorited = false
+    if (data.dayId) {
+      const day = await requireOwnedDay(db, user.id, data.dayId)
+      await db.insert(dayFavorites).values({
+        userId: user.id,
+        exerciseId: exercise.id,
+        dayId: day.id,
+      })
+      favorited = true
+    }
 
     let workoutExerciseId: string | undefined
     if (data.addToWorkoutId) {
@@ -584,19 +576,16 @@ export const createCustomExercise = createServerFn({ method: 'POST' })
     }
 
     return {
-      exercise: mapExerciseRow(exercise, true),
+      exercise: mapExerciseRow(exercise, favorited),
       workoutExerciseId,
     }
   })
 
 export const searchExercises = createServerFn({ method: 'GET' })
-  .validator((data: { query: string; dayType: DayType }) => {
-    if (!isDayType(data.dayType)) throw new Error('Invalid day type')
-    return {
-      query: data.query.trim(),
-      dayType: data.dayType,
-    }
-  })
+  .validator((data: { query: string; dayId: string | null }) => ({
+    query: data.query.trim(),
+    dayId: validateOptionalDayId(data.dayId),
+  }))
   .handler(async ({ data }) => {
     const user = await requireUser()
     if (!data.query) return []
@@ -607,15 +596,15 @@ export const searchExercises = createServerFn({ method: 'GET' })
     const rows = await db
       .select({
         exercise: exercises,
-        favoriteUserId: exerciseFavorites.userId,
+        favoriteUserId: dayFavorites.userId,
       })
       .from(exercises)
       .leftJoin(
-        exerciseFavorites,
+        dayFavorites,
         and(
-          eq(exerciseFavorites.exerciseId, exercises.id),
-          eq(exerciseFavorites.userId, user.id),
-          eq(exerciseFavorites.dayType, data.dayType),
+          eq(dayFavorites.exerciseId, exercises.id),
+          eq(dayFavorites.userId, user.id),
+          eq(dayFavorites.dayId, data.dayId ?? ''),
         ),
       )
       .where(and(like(exercises.name, pattern), exerciseVisibleToUser(user.id)))
@@ -628,44 +617,46 @@ export const searchExercises = createServerFn({ method: 'GET' })
   })
 
 export const toggleFavorite = createServerFn({ method: 'POST' })
-  .validator((data: { exerciseId: string; dayType: DayType }) => {
+  .validator((data: { exerciseId: string; dayId: string }) => {
     if (!data.exerciseId) throw new Error('exerciseId is required')
-    if (!isDayType(data.dayType)) throw new Error('Invalid day type')
+    if (!data.dayId) throw new Error('dayId is required')
     return data
   })
   .handler(async ({ data }) => {
     const user = await requireUser()
     const db = getDb()
 
+    await requireOwnedDay(db, user.id, data.dayId)
+
     const existingRows = await db
       .select()
-      .from(exerciseFavorites)
+      .from(dayFavorites)
       .where(
         and(
-          eq(exerciseFavorites.userId, user.id),
-          eq(exerciseFavorites.exerciseId, data.exerciseId),
-          eq(exerciseFavorites.dayType, data.dayType),
+          eq(dayFavorites.userId, user.id),
+          eq(dayFavorites.exerciseId, data.exerciseId),
+          eq(dayFavorites.dayId, data.dayId),
         ),
       )
       .limit(1)
 
     if (firstRow(existingRows)) {
       await db
-        .delete(exerciseFavorites)
+        .delete(dayFavorites)
         .where(
           and(
-            eq(exerciseFavorites.userId, user.id),
-            eq(exerciseFavorites.exerciseId, data.exerciseId),
-            eq(exerciseFavorites.dayType, data.dayType),
+            eq(dayFavorites.userId, user.id),
+            eq(dayFavorites.exerciseId, data.exerciseId),
+            eq(dayFavorites.dayId, data.dayId),
           ),
         )
       return { favorited: false }
     }
 
-    await db.insert(exerciseFavorites).values({
+    await db.insert(dayFavorites).values({
       userId: user.id,
       exerciseId: data.exerciseId,
-      dayType: data.dayType,
+      dayId: data.dayId,
     })
     return { favorited: true }
   })
@@ -820,7 +811,7 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
     const settings = firstRow(settingsRows)
     const weightInputType =
       pref?.inputType ??
-      (workout.dayType === 'cardio'
+      ((await workoutIsCardio(db, workout))
         ? 'cardio'
         : defaultWeightInputType(row.exercise.equipment))
     const barWeightLbs = pref?.barWeightLbs ?? DEFAULT_BAR_WEIGHT_LBS
@@ -879,7 +870,6 @@ export const getWorkoutExercise = createServerFn({ method: 'GET' })
 
     return {
       workout,
-      dayType: workout.dayType,
       bodyWeightLbs: settings?.bodyWeightLbs ?? null,
       minRepsForMax,
       weightHistory,
@@ -1336,10 +1326,3 @@ export const removeSet = createServerFn({ method: 'POST' })
 
     return { ok: true as const }
   })
-
-export const dayTypeLabels: Record<DayType, string> = {
-  push: 'Push',
-  pull: 'Pull',
-  legs: 'Leg',
-  cardio: 'Cardio',
-}

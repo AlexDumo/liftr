@@ -8,7 +8,6 @@ import { useServerFn } from '@tanstack/react-start'
 import { MagnifyingGlass, Trash } from '@phosphor-icons/react'
 import { useEffect, useState, useTransition } from 'react'
 import { getSession } from '#/lib/auth-session'
-import { DAY_TYPE_LABELS } from '#/lib/day-types'
 import {
   addExerciseToWorkout,
   completeWorkout,
@@ -38,10 +37,10 @@ export const Route = createFileRoute('/workout/$workoutId/')({
     const detail = await getWorkout({ data: { workoutId: params.workoutId } })
     const [favorites, customExercises] = await Promise.all([
       listFavorites({
-        data: { dayType: detail.workout.dayType },
+        data: { dayId: detail.workout.dayId },
       }),
       listCustomExercises({
-        data: { dayType: detail.workout.dayType },
+        data: { dayId: detail.workout.dayId },
       }),
     ])
     return { detail, favorites, customExercises }
@@ -105,7 +104,7 @@ function WorkoutSelectionPage() {
     let cancelled = false
     setSearching(true)
     void searchExercisesFn({
-      data: { query: debouncedQuery, dayType: detail.workout.dayType },
+      data: { query: debouncedQuery, dayId: detail.workout.dayId },
     })
       .then((rows) => {
         if (!cancelled) setResults(rows)
@@ -120,17 +119,20 @@ function WorkoutSelectionPage() {
     return () => {
       cancelled = true
     }
-  }, [debouncedQuery, detail.workout.dayType, searchExercisesFn])
+  }, [debouncedQuery, detail.workout.dayId, searchExercisesFn])
 
   const onToggleFavorite = (exercise: ExerciseListItemData) => {
+    const { dayId } = detail.workout
+    if (!dayId) {
+      setError('This day was deleted, so favorites are unavailable')
+      return
+    }
+
     startTransition(async () => {
       setError(null)
       try {
         const { favorited } = await toggleFavoriteFn({
-          data: {
-            exerciseId: exercise.id,
-            dayType: detail.workout.dayType,
-          },
+          data: { exerciseId: exercise.id, dayId },
         })
 
         setFavorites((prev) => {
@@ -175,7 +177,7 @@ function WorkoutSelectionPage() {
         const { exercise, workoutExerciseId } = await createCustomExerciseFn({
           data: {
             name: trimmedName,
-            dayType: detail.workout.dayType,
+            dayId: detail.workout.dayId,
             addToWorkoutId:
               options?.addToSession && !isCompleted ? workoutId : undefined,
           },
@@ -186,7 +188,10 @@ function WorkoutSelectionPage() {
           return [...prev, exercise].sort((a, b) => a.name.localeCompare(b.name))
         })
 
-        if (!favorites.some((item) => item.id === exercise.id)) {
+        if (
+          exercise.favorited &&
+          !favorites.some((item) => item.id === exercise.id)
+        ) {
           setFavorites((prev) =>
             [...prev, exercise].sort((a, b) => a.name.localeCompare(b.name)),
           )
@@ -267,7 +272,7 @@ function WorkoutSelectionPage() {
       <header className="mb-5 flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold tracking-[0.18em] text-[var(--kicker)] uppercase">
-            {DAY_TYPE_LABELS[detail.workout.dayType]} day
+            {detail.workout.dayName || 'Workout'}
           </p>
           <h1 className="mt-1 font-heading text-2xl font-medium text-[var(--sea-ink)]">
             Exercises
@@ -405,13 +410,13 @@ function WorkoutSelectionPage() {
         <>
           <section className="mb-6">
             <h2 className="mb-2 text-xs font-semibold tracking-wide text-[var(--sea-ink-soft)] uppercase">
-              Favorites for {DAY_TYPE_LABELS[detail.workout.dayType]}
+              Favorites for {detail.workout.dayName || 'this day'}
             </h2>
             <div className="border border-[var(--line)] bg-[var(--surface)]">
               {favorites.length === 0 ? (
                 <p className="px-3 py-6 text-sm text-[var(--sea-ink-soft)]">
                   No favorites yet. Search for an exercise and tap the star to
-                  bookmark it for this day type.
+                  bookmark it for this day.
                 </p>
               ) : (
                 favorites.map((exercise) => (
