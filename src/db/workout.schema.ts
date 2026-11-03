@@ -10,9 +10,6 @@ import {
 } from 'drizzle-orm/sqlite-core'
 import { users } from './auth.schema'
 
-export const dayTypes = ['push', 'pull', 'legs', 'cardio'] as const
-export type DayType = (typeof dayTypes)[number]
-
 export const workoutStatuses = ['in_progress', 'completed'] as const
 export type WorkoutStatus = (typeof workoutStatuses)[number]
 
@@ -54,6 +51,38 @@ export const exercises = sqliteTable(
   ],
 )
 
+export const workoutProfiles = sqliteTable(
+  'workout_profiles',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [index('workout_profiles_userId_idx').on(table.userId)],
+)
+
+export const workoutDays = sqliteTable(
+  'workout_days',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => workoutProfiles.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    isCardio: integer('is_cardio', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (table) => [index('workout_days_profileId_idx').on(table.profileId)],
+)
+
 export const workouts = sqliteTable(
   'workouts',
   {
@@ -61,7 +90,11 @@ export const workouts = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    dayType: text('day_type').$type<DayType>().notNull(),
+    dayId: text('day_id').references(() => workoutDays.id, {
+      onDelete: 'set null',
+    }),
+    // Snapshot so history keeps its label if the day is renamed or deleted.
+    dayName: text('day_name').notNull().default(''),
     status: text('status')
       .$type<WorkoutStatus>()
       .notNull()
@@ -120,8 +153,8 @@ export const workoutSets = sqliteTable(
   ],
 )
 
-export const exerciseFavorites = sqliteTable(
-  'exercise_favorites',
+export const dayFavorites = sqliteTable(
+  'day_favorites',
   {
     userId: text('user_id')
       .notNull()
@@ -129,16 +162,18 @@ export const exerciseFavorites = sqliteTable(
     exerciseId: text('exercise_id')
       .notNull()
       .references(() => exercises.id, { onDelete: 'cascade' }),
-    dayType: text('day_type').$type<DayType>().notNull(),
+    dayId: text('day_id')
+      .notNull()
+      .references(() => workoutDays.id, { onDelete: 'cascade' }),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
   },
   (table) => [
     primaryKey({
-      columns: [table.userId, table.exerciseId, table.dayType],
+      columns: [table.userId, table.exerciseId, table.dayId],
     }),
-    index('exercise_favorites_user_day_idx').on(table.userId, table.dayType),
+    index('day_favorites_user_day_idx').on(table.userId, table.dayId),
   ],
 )
 
@@ -150,6 +185,10 @@ export const userSettings = sqliteTable('user_settings', {
     .references(() => users.id, { onDelete: 'cascade' }),
   bodyWeightLbs: real('body_weight_lbs'),
   minRepsForMax: integer('min_reps_for_max').notNull().default(5),
+  activeProfileId: text('active_profile_id').references(
+    () => workoutProfiles.id,
+    { onDelete: 'set null' },
+  ),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())
@@ -213,13 +252,17 @@ export const exercisesRelations = relations(exercises, ({ one, many }) => ({
     references: [users.id],
   }),
   workoutExercises: many(workoutExercises),
-  favorites: many(exerciseFavorites),
+  favorites: many(dayFavorites),
 }))
 
 export const workoutsRelations = relations(workouts, ({ one, many }) => ({
   user: one(users, {
     fields: [workouts.userId],
     references: [users.id],
+  }),
+  day: one(workoutDays, {
+    fields: [workouts.dayId],
+    references: [workoutDays.id],
   }),
   workoutExercises: many(workoutExercises),
 }))
@@ -246,19 +289,40 @@ export const workoutSetsRelations = relations(workoutSets, ({ one }) => ({
   }),
 }))
 
-export const exerciseFavoritesRelations = relations(
-  exerciseFavorites,
-  ({ one }) => ({
+export const dayFavoritesRelations = relations(dayFavorites, ({ one }) => ({
+  user: one(users, {
+    fields: [dayFavorites.userId],
+    references: [users.id],
+  }),
+  exercise: one(exercises, {
+    fields: [dayFavorites.exerciseId],
+    references: [exercises.id],
+  }),
+  day: one(workoutDays, {
+    fields: [dayFavorites.dayId],
+    references: [workoutDays.id],
+  }),
+}))
+
+export const workoutProfilesRelations = relations(
+  workoutProfiles,
+  ({ one, many }) => ({
     user: one(users, {
-      fields: [exerciseFavorites.userId],
+      fields: [workoutProfiles.userId],
       references: [users.id],
     }),
-    exercise: one(exercises, {
-      fields: [exerciseFavorites.exerciseId],
-      references: [exercises.id],
-    }),
+    days: many(workoutDays),
   }),
 )
+
+export const workoutDaysRelations = relations(workoutDays, ({ one, many }) => ({
+  profile: one(workoutProfiles, {
+    fields: [workoutDays.profileId],
+    references: [workoutProfiles.id],
+  }),
+  workouts: many(workouts),
+  favorites: many(dayFavorites),
+}))
 
 export const userSettingsRelations = relations(userSettings, ({ one }) => ({
   user: one(users, {

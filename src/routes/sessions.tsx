@@ -8,7 +8,6 @@ import { useServerFn } from '@tanstack/react-start'
 import { Trash } from '@phosphor-icons/react'
 import { useState, useTransition } from 'react'
 import { getSession } from '#/lib/auth-session'
-import { DAY_TYPE_LABELS } from '#/lib/day-types'
 import { formatLastWorkoutLabel } from '#/lib/format-last-workout'
 import { deleteWorkout, listWorkouts } from '#/lib/workout.functions'
 import { Button } from '@/components/ui/button'
@@ -86,7 +85,7 @@ function SessionsPage() {
       ) : (
         <ul className="border border-[var(--line)] bg-[var(--surface)]">
           {workouts.map((workout) => {
-            const dayLabel = DAY_TYPE_LABELS[workout.dayType]
+            const dayLabel = workout.dayName || 'Workout'
             const when = workout.completedAt ?? workout.startedAt
             const exerciseLabel =
               workout.exerciseCount === 1
@@ -111,7 +110,7 @@ function SessionsPage() {
                 >
                   <span className="flex items-center justify-between gap-3">
                     <span className="font-medium text-[var(--sea-ink)]">
-                      {dayLabel} day
+                      {dayLabel}
                     </span>
                     <span className="shrink-0 text-xs font-medium tracking-wide text-[var(--sea-ink-soft)] uppercase">
                       {workout.status === 'in_progress'

@@ -3,15 +3,9 @@ import { useServerFn } from '@tanstack/react-start'
 import { useState, useTransition } from 'react'
 import { authClient } from '#/lib/auth-client'
 import { getSession } from '#/lib/auth-session'
-import { DAY_TYPE_BLURBS, DAY_TYPE_LABELS, DAY_TYPES } from '#/lib/day-types'
 import { formatLastWorkoutLabel } from '#/lib/format-last-workout'
-import {
-  dayTypeLabels,
-  getActiveWorkout,
-  getLastCompletedByDayType,
-  startWorkout,
-} from '#/lib/workout.functions'
-import type { DayType } from '#/db/workout.schema'
+import { getActiveProfile } from '#/lib/profile.functions'
+import { getActiveWorkout, startWorkout } from '#/lib/workout.functions'
 import { Button } from '@/components/ui/button'
 
 const isDev = import.meta.env.DEV
@@ -25,28 +19,29 @@ export const Route = createFileRoute('/')({
     return { user: session.user }
   },
   loader: async () => {
-    const [active, lastCompletedByDayType] = await Promise.all([
+    const [active, activeProfile] = await Promise.all([
       getActiveWorkout(),
-      getLastCompletedByDayType(),
+      getActiveProfile(),
     ])
-    return { active, lastCompletedByDayType }
+    return { active, ...activeProfile }
   },
   component: HomePage,
 })
 
 function HomePage() {
   const { user } = Route.useRouteContext()
-  const { active, lastCompletedByDayType } = Route.useLoaderData()
+  const { active, profile, days, lastCompletedByDayId } =
+    Route.useLoaderData()
   const navigate = useNavigate()
   const startWorkoutFn = useServerFn(startWorkout)
-  const [pendingDay, setPendingDay] = useState<DayType | null>(null)
+  const [pendingDay, setPendingDay] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  const begin = (dayType: DayType) => {
-    setPendingDay(dayType)
+  const begin = (dayId: string) => {
+    setPendingDay(dayId)
     startTransition(async () => {
       try {
-        const workout = await startWorkoutFn({ data: { dayType } })
+        const workout = await startWorkoutFn({ data: { dayId } })
         await navigate({
           to: '/workout/$workoutId',
           params: { workoutId: workout.id },
@@ -121,32 +116,54 @@ function HomePage() {
             In progress
           </p>
           <p className="mt-1 font-medium text-[var(--sea-ink)]">
-            Resume {dayTypeLabels[active.dayType]} day
+            Resume {active.dayName || 'workout'}
           </p>
         </button>
       ) : null}
 
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold tracking-wide text-[var(--sea-ink-soft)] uppercase">
+            Profile
+          </p>
+          <p className="truncate font-medium text-[var(--sea-ink)]">
+            {profile.name}
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            void navigate({ to: '/profiles' })
+          }}
+        >
+          Change
+        </Button>
+      </div>
+
       <div className="grid gap-3">
-        {DAY_TYPES.map((dayType) => {
-          const lastCompleted = lastCompletedByDayType[dayType]
+        {days.map((day) => {
+          const lastCompleted = lastCompletedByDayId[day.id]
           return (
             <button
-              key={dayType}
+              key={day.id}
               type="button"
               disabled={isPending}
-              onClick={() => begin(dayType)}
+              onClick={() => begin(day.id)}
               className="group border border-[var(--line)] bg-[var(--surface)] px-5 py-5 text-left transition-all hover:border-[var(--lagoon)] hover:bg-[var(--surface-strong)] disabled:opacity-60"
             >
               <span className="flex items-center justify-between gap-3">
                 <span>
                   <span className="block text-xl font-semibold text-[var(--sea-ink)]">
-                    {DAY_TYPE_LABELS[dayType]}
+                    {day.name}
                   </span>
-                  <span className="mt-1 block text-sm text-[var(--sea-ink-soft)]">
-                    {DAY_TYPE_BLURBS[dayType]}
-                  </span>
+                  {day.description ? (
+                    <span className="mt-1 block text-sm text-[var(--sea-ink-soft)]">
+                      {day.description}
+                    </span>
+                  ) : null}
                 </span>
-                {pendingDay === dayType ? (
+                {pendingDay === day.id ? (
                   <span className="shrink-0 text-sm font-medium text-[var(--lagoon-deep)]">
                     Starting…
                   </span>
